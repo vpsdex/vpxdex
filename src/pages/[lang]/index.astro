@@ -48,7 +48,7 @@ for (const row of data) {
   categories.get(cat)!.push(row);
 }
 
-const siteUrl = Astro.url.origin;
+const siteUrl = 'https://vpsdex.com';
 const alternates = locales.map((l) => ({ lang: l, href: `${siteUrl}/${l}/` }));
 
 // Prepare data for client-side search
@@ -69,10 +69,10 @@ const homeJsonLd = {
   '@type': 'WebSite',
   name: t(lang as Locale, 'site.brand'),
   description: t(lang as Locale, 'site.description'),
-  url: `${Astro.url.origin}/${lang}/`,
+  url: `${siteUrl}/${lang}/`,
   potentialAction: {
     '@type': 'SearchAction',
-    target: `${Astro.url.origin}/${lang}/?q={search_term_string}`,
+    target: `${siteUrl}/${lang}/?q={search_term_string}`,
     'query-input': 'required name=search_term_string',
   },
 };

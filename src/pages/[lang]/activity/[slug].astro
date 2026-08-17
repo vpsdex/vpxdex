@@ -143,7 +143,7 @@ const relatedActivities = relatedRows.map((row) => ({
 const siteName = t(lang, 'site.brand');
 const pageTitle = activity.metaTitle || activity.title;
 const pageDesc = activity.metaDesc || activity.description || richTextToPlainText(activity.content).slice(0, 160);
-const siteUrl = Astro.url.origin;
+const siteUrl = 'https://vpsdex.com';
 const pageUrl = `${siteUrl}/${lang}/activity/${activity.slug}/`;
 const alternates = locales.map((l) => ({
   lang: l,

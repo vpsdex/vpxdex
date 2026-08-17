@@ -69,7 +69,7 @@ const pageTitle = lang === 'zh' ? '最新活动' : 'Latest Activities';
 const pageDesc = lang === 'zh'
   ? '查看最新的VPS优惠活动、产品更新和行业资讯'
   : 'Check out the latest VPS deals, product updates, and industry news';
-const siteUrl = Astro.url.origin;
+const siteUrl = 'https://vpsdex.com';
 const alternates = locales.map((l) => ({ lang: l, href: `${siteUrl}/${l}/activities/` }));
 
 // 构建结构化数据对象，渲染时用 JSON.stringify 序列化为合法 JSON-LD
