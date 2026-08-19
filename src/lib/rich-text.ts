@@ -16,6 +16,7 @@ const allowedTags = [
   'h3',
   'hr',
   'img',
+  'a',
 ];
 
 export function sanitizeRichText(html: string | null | undefined): string | null {
@@ -27,7 +28,9 @@ export function sanitizeRichText(html: string | null | undefined): string | null
     allowedTags,
     allowedAttributes: {
       img: ['src', 'alt', 'title', 'width', 'height'],
+      a: ['href', 'title', 'target', 'rel'],
     },
+    allowedSchemes: ['http', 'https', 'mailto'],
   }).trim();
 
   return sanitized ? sanitized : null;

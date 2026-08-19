@@ -76,6 +76,27 @@ const homeJsonLd = {
     'query-input': 'required name=search_term_string',
   },
 };
+
+const orgJsonLd = {
+  '@context': 'https://schema.org',
+  '@type': 'Organization',
+  name: t(lang as Locale, 'site.brand'),
+  url: `${siteUrl}/${lang}/`,
+  description: t(lang as Locale, 'site.description'),
+};
+
+const itemListJsonLd = {
+  '@context': 'https://schema.org',
+  '@type': 'ItemList',
+  name: lang === 'zh' ? 'VPSDEX 收录服务商' : 'VPSDEX listed providers',
+  numberOfItems: providerSearchData.length,
+  itemListElement: providerSearchData.slice(0, 30).map((item, i) => ({
+    '@type': 'ListItem',
+    position: i + 1,
+    url: `${siteUrl}/${lang}/provider/${item.providers.slug}/`,
+    name: item.providers.name,
+  })),
+};
 ---
 
 <BaseLayout
@@ -84,6 +105,7 @@ const homeJsonLd = {
   lang={lang as Locale}
   alternates={alternates}
   jsonLd={homeJsonLd}
+  extraJsonLd={[orgJsonLd, itemListJsonLd]}
 >
   <section class="home-hero">
     <p class="eyebrow">{lang === 'zh' ? '服务商目录' : 'Provider directory'}</p>
