@@ -26,7 +26,10 @@ const provider = await db
   .get();
 
 if (!provider) {
-  return Astro.redirect(`/${lang}/`);
+  return new Response('Not Found', {
+    status: 404,
+    headers: { 'content-type': 'text/plain; charset=utf-8' },
+  });
 }
 
 // Get content for current language

@@ -12,7 +12,10 @@ import { richTextToPlainText } from '../../lib/rich-text';
 
 const lang = Astro.params.lang as string;
 if (!isValidLocale(lang)) {
-  return Astro.redirect(`/${defaultLocale}/`);
+  return new Response('Not Found', {
+    status: 404,
+    headers: { 'content-type': 'text/plain; charset=utf-8' },
+  });
 }
 
 const db = getDb(env.DB);

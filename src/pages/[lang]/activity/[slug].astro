@@ -82,7 +82,10 @@ if (!activityData[0]) {
 const activityBasic = activityData[0];
 
 if (!activityBasic) {
-  return Astro.redirect('/zh/activities/');
+  return new Response('Not Found', {
+    status: 404,
+    headers: { 'content-type': 'text/plain; charset=utf-8' },
+  });
 }
 
 const activity = {
