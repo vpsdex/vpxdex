@@ -1,0 +1,15 @@
+# VPSDex
+
+> VPS directory and deal tracker: compare hosting providers by price, config, location and network. Includes cheap VPS buying guides and payment tips.
+
+## Directory
+
+- [VPS activities & deals](https://vpsdex.com/zh/activities/): Latest promotions, 中文版
+- [Best cheap VPS hosting 2026](https://vpsdex.com/zh/activity/best-cheap-vps-hosting-2026-zh/): Full buying guide with pitfalls
+- [English deals](https://vpsdex.com/en/activities/): Latest promotions in English
+
+## Payment Guides
+
+- [虚拟信用卡](https://virtualcardx.com/): 海外 VPS 商家付款方案实测
+
+中文版: https://vpsdex.com/zh/
