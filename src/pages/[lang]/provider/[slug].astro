@@ -75,6 +75,44 @@ const jsonLd = {
     ? { '@type': 'AggregateRating', ratingValue: provider.rating, bestRating: 5 }
     : undefined,
 };
+
+// ===== SEO 增强：数据驱动 FAQ（不增加额外数据库查询） =====
+// FAQ 数据（利用已有字段：tags/rating/category/url）
+const categoryTagText = tags.length > 0 ? tags.slice(0, 6).join('、') : '';
+const ratingText = provider.rating != null && provider.rating > 0 ? provider.rating.toFixed(1) : null;
+const faqItems = [
+  {
+    q: lang === 'zh' ? `${name} 怎么样？` : `How is ${name}?`,
+    a:
+      lang === 'zh'
+        ? `${name} 是一家${categoryLabel}服务商${ratingText ? `，在 ${t(lang, 'site.brand')} 目录中的评分为 ${ratingText}/5` : ''}${categoryTagText ? `，主要特点包括：${categoryTagText}` : ''}。本页汇总了它的服务范围与适用场景，建议结合官网最新信息与用户评分综合判断。`
+        : `${name} is a ${categoryLabel} provider${ratingText ? ` rated ${ratingText}/5 on ${t(lang, 'site.brand')}` : ''}${categoryTagText ? `, known for: ${categoryTagText}` : ''}. This page summarizes its service scope and use cases; cross-check with the official site and user reviews.`,
+  },
+  {
+    q: lang === 'zh' ? `${name} 适合什么场景？` : `What is ${name} good for?`,
+    a:
+      lang === 'zh'
+        ? `根据目录收录信息，${name} 的服务定位围绕${categoryLabel}展开${categoryTagText ? `，标签「${categoryTagText}」反映了其主要优势方向` : ''}。选择前建议先明确自身需求（如节点位置、预算、流量要求），再对照官网的套餐与价格做决策；同类服务商可在本页下方对比。`
+        : `Based on directory data, ${name} focuses on ${categoryLabel} services${categoryTagText ? `; the tags "${categoryTagText}" reflect its main strengths` : ''}. Clarify your needs (location, budget, traffic) before comparing plans on the official site; see related providers below.`,
+  },
+  {
+    q: lang === 'zh' ? `如何访问 ${name} 官网？` : `How to visit ${name}?`,
+    a:
+      lang === 'zh'
+        ? `点击本页的「访问官网」按钮即可跳转 ${name} 官方网站。注册前建议核对套餐价格与条款的时效性，促销与库存会随时调整；如遇官网无法访问，可能是区域网络限制，可尝试更换网络环境。`
+        : `Click the "Visit Website" button to open the official ${name} site. Verify current pricing and terms before signing up, as promos and stock change frequently; if the site is unreachable, it may be a regional network issue.`,
+  },
+];
+
+const faqJsonLd = {
+  '@context': 'https://schema.org',
+  '@type': 'FAQPage',
+  mainEntity: faqItems.map((f) => ({
+    '@type': 'Question',
+    name: f.q,
+    acceptedAnswer: { '@type': 'Answer', text: f.a },
+  })),
+};
 ---
 
 <BaseLayout
@@ -83,6 +121,7 @@ const jsonLd = {
   lang={lang}
   alternates={alternates}
   jsonLd={jsonLd}
+  extraJsonLd={[faqJsonLd]}
 >
   <div class="max-w-4xl mx-auto pt-3">
     <a href={`/${lang}/`} class="text-sm text-gray-500 hover:text-gray-700 mb-6 inline-block">
@@ -140,5 +179,22 @@ const jsonLd = {
         </a>
       </div>
     </div>
+
+    <!-- FAQ 区块（数据驱动） -->
+    <div class="bg-white rounded-xl border border-gray-200 p-6 sm:p-8 shadow-sm mt-6">
+      <h2 class="text-lg font-semibold text-gray-800 mb-4">
+        {lang === 'zh' ? '常见问题' : 'FAQ'}
+      </h2>
+      <div class="space-y-5">
+        {faqItems.map((f) => (
+          <div>
+            <h3 class="font-semibold text-gray-900 text-sm mb-1">{f.q}</h3>
+            <p class="text-sm text-gray-600 leading-relaxed">{f.a}</p>
+          </div>
+        ))}
+      </div>
+    </div>
+
+
   </div>
 </BaseLayout>
