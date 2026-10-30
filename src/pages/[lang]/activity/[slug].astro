@@ -6,16 +6,21 @@ import { t } from '../../../i18n/utils';
 import type { Locale } from '../../../i18n/config';
 import { isValidLocale, locales } from '../../../i18n/config';
 import { getDb } from '../../../lib/db';
-import { activities, activitiesContent, activityCategories } from '../../../db/schema';
-import { eq, and, desc, sql } from 'drizzle-orm';
+import { activities, activitiesContent } from '../../../db/schema';
+import { eq, and, sql } from 'drizzle-orm';
 import { env } from 'cloudflare:workers';
 import { richTextToPlainText, sanitizeRichText } from '../../../lib/rich-text';
+import { getActivityImageUrl } from '../../../lib/r2';
+import { rankRelatedActivities } from '../../../lib/activity-related';
 
 const lang = Astro.params.lang as string;
 const slug = Astro.params.slug;
 
 if (!isValidLocale(lang)) {
   return Astro.redirect('/zh/');
+}
+if (!slug) {
+  return new Response('Not Found', { status: 404 });
 }
 
 const db = getDb(env.DB);
@@ -25,9 +30,9 @@ const getActivityByLocalizedSlug = (activitySlug: string) =>
     .select({
       id: activities.id,
       baseSlug: activities.slug,
-      categoryId: activities.category_id,
       publishedAt: activities.published_at,
       isFeatured: activities.is_featured,
+      featuredImageKey: activities.featured_image_key,
       viewCount: activities.view_count,
       contentSlug: activitiesContent.slug,
       title: activitiesContent.title,
@@ -35,15 +40,12 @@ const getActivityByLocalizedSlug = (activitySlug: string) =>
       content: activitiesContent.content,
       metaTitle: activitiesContent.meta_title,
       metaDesc: activitiesContent.meta_desc,
-      categorySlug: activityCategories.slug,
-      categoryIcon: activityCategories.icon,
     })
     .from(activities)
     .innerJoin(
       activitiesContent,
       and(eq(activitiesContent.activity_id, activities.id), eq(activitiesContent.lang, lang)),
     )
-    .leftJoin(activityCategories, eq(activities.category_id, activityCategories.id))
     .where(and(eq(activitiesContent.slug, activitySlug), eq(activities.is_active, true)))
     .limit(1);
 
@@ -52,9 +54,9 @@ const getActivityByBaseSlug = (activitySlug: string) =>
     .select({
       id: activities.id,
       baseSlug: activities.slug,
-      categoryId: activities.category_id,
       publishedAt: activities.published_at,
       isFeatured: activities.is_featured,
+      featuredImageKey: activities.featured_image_key,
       viewCount: activities.view_count,
       contentSlug: activitiesContent.slug,
       title: activitiesContent.title,
@@ -62,15 +64,12 @@ const getActivityByBaseSlug = (activitySlug: string) =>
       content: activitiesContent.content,
       metaTitle: activitiesContent.meta_title,
       metaDesc: activitiesContent.meta_desc,
-      categorySlug: activityCategories.slug,
-      categoryIcon: activityCategories.icon,
     })
   .from(activities)
     .innerJoin(
       activitiesContent,
       and(eq(activitiesContent.activity_id, activities.id), eq(activitiesContent.lang, lang)),
     )
-    .leftJoin(activityCategories, eq(activities.category_id, activityCategories.id))
     .where(and(eq(activities.slug, activitySlug), eq(activities.is_active, true)))
     .limit(1);
 
@@ -91,17 +90,15 @@ if (!activityBasic) {
 const activity = {
   id: activityBasic.id,
   slug: activityBasic.contentSlug || activityBasic.baseSlug,
-  categoryId: activityBasic.categoryId,
   publishedAt: activityBasic.publishedAt,
   isFeatured: activityBasic.isFeatured,
+  featuredImage: getActivityImageUrl(activityBasic.featuredImageKey),
   viewCount: activityBasic.viewCount,
   title: activityBasic.title || '',
   description: activityBasic.description || '',
   content: activityBasic.content || '',
   metaTitle: activityBasic.metaTitle || '',
   metaDesc: activityBasic.metaDesc || '',
-  categorySlug: activityBasic.categorySlug || '',
-  categoryIcon: activityBasic.categoryIcon || '',
 };
 
 if (slug !== activity.slug) {
@@ -110,49 +107,56 @@ if (slug !== activity.slug) {
 
 // Increment view count
 await db.update(activities)
-  .set({ view_count: activityBasic.viewCount + 1 })
+  .set({ view_count: sql`${activities.view_count} + 1` })
   .where(eq(activities.id, activityBasic.id));
 
-// Get related activities with content via JOINs
+// Rank related activities by shared provider/topic terms, then use recency only as fallback.
 const relatedRows = await db
   .select({
+    id: activities.id,
     slug: activitiesContent.slug,
     fallbackSlug: activities.slug,
     title: activitiesContent.title,
     publishedAt: activities.published_at,
-    categorySlug: activityCategories.slug,
   })
   .from(activities)
-  .leftJoin(
+  .innerJoin(
     activitiesContent,
     and(eq(activitiesContent.activity_id, activities.id), eq(activitiesContent.lang, lang)),
   )
-  .leftJoin(activityCategories, eq(activities.category_id, activityCategories.id))
   .where(and(
     eq(activities.is_active, true),
-    eq(activities.category_id, activity.categoryId),
     sql`${activities.id} != ${activityBasic.id}`
-  ))
-  .orderBy(desc(activities.published_at))
-  .limit(4);
+  ));
 
-const relatedActivities = relatedRows.map((row) => ({
-  slug: row.slug || row.fallbackSlug,
-  title: row.title || '',
-  publishedAt: row.publishedAt,
-  categorySlug: row.categorySlug || '',
-}));
+const relatedActivities = rankRelatedActivities(
+  relatedRows.map((row) => ({
+    id: row.id,
+    slug: row.slug || row.fallbackSlug,
+    title: row.title || '',
+    publishedAt: row.publishedAt,
+  })),
+  { id: activityBasic.id, slug: activity.slug, title: activity.title },
+  4,
+);
+
+const localizedSlugRows = await db
+  .select({ lang: activitiesContent.lang, slug: activitiesContent.slug })
+  .from(activitiesContent)
+  .where(eq(activitiesContent.activity_id, activityBasic.id));
+const localizedSlugs = new Map(localizedSlugRows.map((row) => [row.lang, row.slug]));
 
 const siteName = t(lang, 'site.brand');
 const pageTitle = activity.metaTitle || activity.title;
 const pageDesc = activity.metaDesc || activity.description || richTextToPlainText(activity.content).slice(0, 160);
-const siteUrl = 'https://vpsdex.com';
+const siteUrl = Astro.site!.href.replace(/\/$/, '');
 const pageUrl = `${siteUrl}/${lang}/activity/${activity.slug}/`;
+const featuredImageUrl = activity.featuredImage ? `${siteUrl}${activity.featuredImage}` : null;
 const alternates = locales.map((l) => ({
   lang: l,
-  href: `${siteUrl}/${l}/activity/${activity.slug}/`,
+  href: `${siteUrl}/${l}/activity/${localizedSlugs.get(l) || activityBasic.baseSlug}/`,
 }));
-const categoryLabel = activity.categorySlug;
+const xDefaultUrl = `${siteUrl}/zh/activity/${localizedSlugs.get('zh') || activityBasic.baseSlug}/`;
 
 // Get content as plain text for SEO
 const contentText = richTextToPlainText(activity.content);
@@ -177,18 +181,18 @@ const readingTime = Math.ceil(wordCount / 200); // Assume 200 words per minute
     <meta property="og:url" content={pageUrl} />
     <meta property="og:locale" content={lang === 'zh' ? 'zh_CN' : 'en_US'} />
     <meta property="og:site_name" content={siteName} />
+    {featuredImageUrl && <meta property="og:image" content={featuredImageUrl} />}
     <meta property="article:published_time" content={activity.publishedAt} />
-    <meta property="article:section" content={activity.categorySlug} />
-    {activity.isFeatured && <meta property="article:section" content="featured" />}
 
     <!-- Twitter Card -->
     <meta name="twitter:card" content="summary_large_image" />
     <meta name="twitter:title" content={pageTitle} />
     <meta name="twitter:description" content={pageDesc} />
+    {featuredImageUrl && <meta name="twitter:image" content={featuredImageUrl} />}
 
     <!-- Hreflang -->
     {alternates.map((alt) => <link rel="alternate" hreflang={alt.lang} href={alt.href} />)}
-    <link rel="alternate" hreflang="x-default" href={`${siteUrl}/zh/activity/${activity.slug}/`} />
+    <link rel="alternate" hreflang="x-default" href={xDefaultUrl} />
 
     <!-- Schema.org structured data for Article -->
     <script type="application/ld+json" set:html={JSON.stringify({
@@ -201,8 +205,7 @@ const readingTime = Math.ceil(wordCount / 200); // Assume 200 words per minute
       "dateModified": activity.publishedAt,
       "inLanguage": lang,
       "wordCount": wordCount,
-      "genre": [activity.categorySlug, activity.isFeatured ? "featured" : ""].filter(Boolean),
-      "articleSection": activity.categorySlug,
+      ...(featuredImageUrl && { "image": featuredImageUrl }),
       "author": {
         "@type": "Organization",
         "name": siteName
@@ -248,7 +251,7 @@ const readingTime = Math.ceil(wordCount / 200); // Assume 200 words per minute
     })} />
   </head>
   <body class="min-h-screen bg-gray-50 text-gray-900 flex flex-col">
-    <Header lang={lang} />
+    <Header lang={lang} alternates={alternates} />
 
     <main class="flex-1 container mx-auto px-4 py-8 max-w-4xl">
       <!-- Breadcrumb -->
@@ -263,18 +266,25 @@ const readingTime = Math.ceil(wordCount / 200); // Assume 200 words per minute
       </nav>
 
       <!-- Article Header -->
-      <article class="bg-white rounded-lg border border-gray-200 overflow-hidden mb-8">
-        <header class="px-8 pt-8 pb-6 border-b border-gray-100">
-          <div class="flex items-center gap-2 mb-4">
-            <span class="px-3 py-1 rounded-full text-xs font-medium bg-gray-100">
-              {categoryLabel}
-            </span>
-            {activity.isFeatured && (
+      <article class="article-shell bg-white border border-gray-200 overflow-hidden mb-8">
+        {activity.featuredImage && (
+          <img
+            src={activity.featuredImage}
+            alt={activity.title}
+            width="960"
+            height="540"
+            fetchpriority="high"
+            class="aspect-video w-full border-b border-gray-100 object-cover"
+          />
+        )}
+        <header class="article-header px-8 pt-8 pb-6 border-b border-gray-100">
+          {activity.isFeatured && (
+            <div class="flex items-center gap-2 mb-4">
               <span class="px-3 py-1 rounded-full text-xs font-medium bg-yellow-100 text-yellow-800">
                 ⭐ {lang === 'zh' ? '推荐' : 'Featured'}
               </span>
-            )}
-          </div>
+            </div>
+          )}
 
           <h1 class="text-3xl md:text-4xl font-bold leading-tight mb-3">{activity.title}</h1>
 
@@ -305,15 +315,15 @@ const readingTime = Math.ceil(wordCount / 200); // Assume 200 words per minute
 
       <!-- Related Activities -->
       {relatedActivities.length > 0 && (
-        <section class="bg-white rounded-lg border border-gray-200 p-6">
+        <section class="related-panel bg-white border border-gray-200 p-6">
           <h2 class="text-2xl font-bold mb-6">
             {lang === 'zh' ? '相关活动' : 'Related Activities'}
           </h2>
           <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
             {relatedActivities.map((related) => (
-              <a href={`/${lang}/activity/${related.slug}/`} class="block p-4 rounded-lg border border-gray-200 hover:border-blue-300 hover:shadow-md transition-all">
+              <a href={`/${lang}/activity/${related.slug}/`} class="related-card block p-4 rounded-lg border border-gray-200 transition-all">
                 <div class="text-xs text-gray-500 mb-2">
-                  {related.categorySlug} • {new Date(related.publishedAt).toLocaleDateString(lang === 'zh' ? 'zh-CN' : 'en-US')}
+                  {new Date(related.publishedAt).toLocaleDateString(lang === 'zh' ? 'zh-CN' : 'en-US')}
                 </div>
                 <h3 class="font-semibold mb-2 line-clamp-2">{related.title}</h3>
               </a>

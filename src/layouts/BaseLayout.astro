@@ -12,9 +12,13 @@ interface Props {
   alternates?: { lang: string; href: string }[];
   jsonLd?: Record<string, unknown>;
   extraJsonLd?: Record<string, unknown>[];
+  xDefault?: string;
+  canonical?: string;
+  prev?: string;
+  next?: string;
 }
 
-const { title, description, lang = 'zh', alternates, jsonLd, extraJsonLd } = Astro.props;
+const { title, description, lang = 'zh', alternates, jsonLd, extraJsonLd, xDefault, canonical, prev, next } = Astro.props;
 ---
 
 <!doctype html>
@@ -26,11 +30,11 @@ const { title, description, lang = 'zh', alternates, jsonLd, extraJsonLd } = Ast
     <meta name="theme-color" content="#122235" />
     <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
     <link rel="sitemap" href="/sitemap.xml" />
-    <SEO title={title} description={description} alternates={alternates} jsonLd={jsonLd} />
+    <SEO title={title} description={description} alternates={alternates} jsonLd={jsonLd} xDefault={xDefault} canonical={canonical} prev={prev} next={next} />
     {extraJsonLd?.map((obj) => <script type="application/ld+json" set:html={JSON.stringify(obj)} />)}
   </head>
   <body class="min-h-screen flex flex-col bg-gray-50 text-gray-900 antialiased">
-    <Header lang={lang} />
+    <Header lang={lang} alternates={alternates} />
     <main class="site-main flex-1 mx-auto px-5 sm:px-6 py-8">
       <slot />
     </main>

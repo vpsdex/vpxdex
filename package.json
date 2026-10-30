@@ -9,12 +9,15 @@
     "dev": "astro dev",
     "clean": "node scripts/clean.mjs",
     "build": "node scripts/clean.mjs && astro build",
+    "test": "node --test tests/*.test.mjs && npm run test:seo",
+    "test:seo": "node scripts/verify-seo-source.mjs",
+    "check": "astro check",
     "preview": "astro preview",
     "db:generate": "drizzle-kit generate",
     "db:migrate": "wrangler d1 migrations apply vpsdir-db --local",
     "db:seed": "node scripts/seed.mjs",
     "db:setup": "npm run db:generate && npm run db:migrate && npm run db:seed",
-    "deploy": "npm run build && wrangler deploy",
+    "deploy": "npm run build && wrangler deploy && node scripts/indexnow-submit.mjs",
     "astro": "astro"
   },
   "dependencies": {
@@ -30,8 +33,11 @@
     "tailwindcss": "^4.2.4"
   },
   "devDependencies": {
-    "@cloudflare/workers-types": "^4.20260504.1",
+    "@astrojs/check": "^0.9.10",
+    "@cloudflare/workers-types": "^5.20260823.1",
+    "@types/sanitize-html": "^2.16.1",
     "drizzle-kit": "^0.31.10",
-    "wrangler": "^4.87.0"
+    "typescript": "^6.0.3",
+    "wrangler": "^4.125.0"
   }
 }

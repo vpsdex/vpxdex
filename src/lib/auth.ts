@@ -6,8 +6,8 @@ function toHex(bytes: Uint8Array): string {
     .join('');
 }
 
-function fromHex(hex: string): Uint8Array {
-  const bytes = new Uint8Array(hex.length / 2);
+function fromHex(hex: string): Uint8Array<ArrayBuffer> {
+  const bytes = new Uint8Array(new ArrayBuffer(hex.length / 2));
   for (let i = 0; i < hex.length; i += 2) {
     bytes[i / 2] = parseInt(hex.slice(i, i + 2), 16);
   }
@@ -16,7 +16,7 @@ function fromHex(hex: string): Uint8Array {
 
 export async function hashPassword(password: string): Promise<string> {
   const encoder = new TextEncoder();
-  const salt = crypto.getRandomValues(new Uint8Array(16));
+  const salt = crypto.getRandomValues(new Uint8Array(new ArrayBuffer(16)));
   const keyMaterial = await crypto.subtle.importKey(
     'raw',
     encoder.encode(password),
@@ -52,6 +52,7 @@ export async function verifyPassword(password: string, stored: string): Promise<
 }
 
 export async function createSession(userId: number, secret: string): Promise<string> {
+  if (!secret) throw new Error('ADMIN_SESSION_SECRET is not configured');
   const payload = JSON.stringify({ sub: userId, exp: Date.now() + 24 * 60 * 60 * 1000 });
   const encoder = new TextEncoder();
   const key = await crypto.subtle.importKey(
@@ -70,6 +71,7 @@ export async function verifySession(
   token: string,
   secret: string,
 ): Promise<{ sub: number } | null> {
+  if (!secret) return null;
   try {
     const decoded = atob(token);
     const dotIndex = decoded.lastIndexOf('.');

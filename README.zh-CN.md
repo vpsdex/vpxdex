@@ -7,7 +7,7 @@
 ## 项目亮点
 
 - 提供中英双语的服务商列表、服务商详情页和活动内容页面
-- 后台支持服务商管理、活动管理、分类管理与当前用户密码修改
+- 后台支持服务商管理、活动管理、特色图片上传与当前用户密码修改
 - 原生使用 Cloudflare D1、KV、R2 与 Workers 组成完整站点能力
 - 使用 PBKDF2 密码哈希与 HMAC 签名会话实现轻量认证
 - 采用深色导航、暖色卡片和双语界面的自定义主题风格
@@ -17,7 +17,7 @@
 - **框架**: [Astro](https://astro.build/) v6 (`output: 'server'`，运行在 Cloudflare Workers 上)
 - **适配器**: [@astrojs/cloudflare](https://docs.astro.build/en/guides/integrations-guide/cloudflare/) v13 (Workers 部署)
 - **数据库**: Cloudflare D1 + [Drizzle ORM](https://orm.drizzle.team/)
-- **存储**: Cloudflare R2 (Logo 图片)
+- **存储**: Cloudflare R2（服务商 Logo、活动特色图片与富文本图片）
 - **缓存**: Cloudflare KV (数据缓存)
 - **样式**: Tailwind CSS v4 + 基于 CSS 变量的自定义主题
 - **编辑器**: TipTap 富文本编辑器，用于后台活动内容编辑
@@ -107,7 +107,7 @@ npm run db:seed
 npm run db:setup
 ```
 
-活动模块的迁移还会自动创建默认活动分类：
+活动模块迁移会创建以下内部兼容分类。它们仅用于满足现有数据库/API 关联，不再显示于公开活动页和后台活动界面：
 
 - `news`
 - `events`
@@ -116,10 +116,11 @@ npm run db:setup
 
 ### 4. 配置本地开发密钥
 
-在项目根目录创建 `.dev.vars` 文件：
+复制模板 `.dev.vars.example` 为 `.dev.vars`,填入随机值(`.dev.vars` 已被 gitignore,真实密钥严禁提交):
 
 ```
 ADMIN_SESSION_SECRET=any-random-string-for-local-dev
+API_BEARER_TOKEN=your-local-bearer-token
 ```
 
 ### 5. 启动开发服务器
@@ -137,14 +138,14 @@ npx wrangler dev
 
 Worker 地址：`http://localhost:8787`。
 
-### 6. 可选的类型与 Astro 校验
-
-当前项目默认依赖中未包含 `astro check` 所需包。如果你要执行模板和类型校验，请先安装：
+### 6. 执行检查与测试
 
 ```bash
-npm install -D @astrojs/check typescript
-npx astro check
+npm run check
+npm test
 ```
+
+`check` 执行 Astro 模板与 TypeScript 检查；`test` 执行输入/图片安全回归测试与 SEO 源码检查。
 
 ## 生产部署
 
@@ -191,6 +192,8 @@ wrangler d1 execute vpsdir-db --local --command="SELECT password_hash FROM users
 | --------------------- | ------------------------- |
 | `npm run dev`         | 启动 Astro 开发服务器            |
 | `npm run build`       | 清理 + 生产构建                 |
+| `npm run check`       | Astro 模板与 TypeScript 检查    |
+| `npm test`            | 安全回归测试 + SEO 源码检查      |
 | `npm run preview`     | 本地预览构建产物                  |
 | `npm run clean`       | 终止残留 workerd 进程并删除 dist/  |
 | `npm run deploy`      | 构建并部署到 Cloudflare Workers |
@@ -207,11 +210,13 @@ wrangler d1 execute vpsdir-db --local --command="SELECT password_hash FROM users
 | ------------------------------------------- | --- | --------------------------- |
 | `/`                                         | SSR | 重定向到 `/zh/`                 |
 | `/zh/` `/en/`                               | SSR | 首页, 服务商列表 (KV 缓存)           |
+| `/zh/category/[category]/` `/en/category/[category]/` | SSR | 服务商类目分页列表（每页 12 条） |
 | `/zh/provider/[slug]` `/en/provider/[slug]` | SSR | 服务商详情, 含 JSON-LD + hreflang |
-| `/zh/activities/` `/en/activities/`         | SSR | 活动列表页                       |
-| `/zh/activity/[slug]` `/en/activity/[slug]` | SSR | 活动详情页, 支持双语内容               |
+| `/zh/activities/` `/en/activities/`         | SSR | 活动分页列表（每页 12 条），特色图片位于卡片内容上方 |
+| `/zh/activity/[slug]` `/en/activity/[slug]` | SSR | 双语活动详情，支持特色头图               |
 | `/sitemap.xml`                              | SSR | 动态站点地图, 含双语备用链接             |
 | `/api/logo/[key]`                           | SSR | 从 R2 提供 Logo, 带 CDN 缓存头     |
+| `/api/image/[path]`                         | SSR | 从 R2 提供活动特色图和富文本图片           |
 
 ### 管理后台
 
@@ -219,16 +224,26 @@ wrangler d1 execute vpsdir-db --local --command="SELECT password_hash FROM users
 | ----------------------------- | ---------------------- |
 | `/admin/login`                | 管理员登录                  |
 | `/admin/`                     | 服务商管理 -- 服务商列表、添加表单、缓存刷新 |
-| `/admin/activities/`          | 活动管理 -- 列表、新建、删除       |
-| `/admin/activities/edit/[id]` | 编辑活动，支持双语富文本字段         |
+| `/admin/activities/`          | 活动管理 -- 列表、新建、删除、上传特色图 |
+| `/admin/activities/edit/[id]` | 编辑双语内容，更换或移除特色图片       |
 | `/admin/edit/[id]`            | 编辑服务商 (双语字段, Logo 上传)  |
 | `/admin/settings`             | 用户设置 -- 修改当前用户密码       |
 
 ## 后台功能
 
 - **服务商管理**: 新增、编辑、删除服务商，上传 Logo，刷新 KV 缓存
-- **活动管理**: 新增、编辑、删除活动，并管理活动分类
+- **活动管理**: 新增、编辑、删除活动，上传、预览、更换或移除特色图片；活动界面不再暴露分类
 - **用户设置**: 修改当前已登录管理员用户的密码
+
+### 活动分页与特色图片
+
+- 服务商类目列表和最新活动列表均使用服务端分页，每页 12 条。
+- 第 1 页使用无参数规范地址，后续页面使用 `?page=N`；无效或过期的越界页会跳转至最后一个有效页。
+- 带有旧 `?category=` 参数的活动地址会跳转至对应的无分类活动地址。
+- 后台活动新增/编辑请求使用 `multipart/form-data`：`featured_image` 用于上传特色图，编辑时传 `remove_featured_image=1` 可移除。
+- 支持 JPG、PNG、GIF、WebP、SVG，最大 5MB；上传前校验文件签名，随后存入 R2 的 `activity-images/` 目录。
+- 已设置的特色图固定作为卡片第一个区域，以全宽 16:9 显示在卡片正文上方，并作为文章头图；未设置时不渲染空白图片区。
+- 特色图片同时写入 Open Graph、Twitter Card 和 Article JSON-LD 元数据。
 
 ## 后台样式约定
 
@@ -259,8 +274,7 @@ wrangler d1 execute vpsdir-db --local --command="SELECT password_hash FROM users
 | `/api/auth/login`                           | POST | 管理员认证 (PBKDF2) |
 | `/api/auth/logout`                          | POST | 清除会话 Cookie    |
 | `/api/auth/password`                        | POST | 修改当前用户密码       |
-| `/api/admin/activity-categories`            | GET  | 读取活动分类列表       |
-| `/api/admin/activity-categories`            | POST | 创建分类或通过 `_method=DELETE` 删除 |
+| `/api/admin/activity-categories`            | GET/POST | 旧版内部分类兼容端点（界面不再使用） |
 | `/api/admin/providers`                      | POST | 创建服务商          |
 | `/api/admin/providers?id=X&_method=PUT`     | POST | 更新服务商          |
 | `/api/admin/providers?id=X&_method=DELETE`  | POST | 删除服务商          |
@@ -270,6 +284,8 @@ wrangler d1 execute vpsdir-db --local --command="SELECT password_hash FROM users
 | `/api/admin/activities?id=X&_method=DELETE` | POST | 删除活动           |
 | `/api/admin/upload-image`                   | POST | 上传富文本图片到 R2    |
 | `/api/admin/cache-refresh`                  | POST | 清除 KV 缓存       |
+
+后台活动表单不再提交 `category_id`。新建时由服务端自动选择内部兼容分类，编辑时沿用原内部分类。为保持向后兼容，v1 JSON API 仍接受并要求 `category_id`。通过 `POST /api/v1/upload` 并设置 `type=activity`，可获得用于 v1 活动新增/更新的 `featured_image_key`。
 
 ## 数据库模型
 
@@ -287,11 +303,11 @@ wrangler d1 execute vpsdir-db --local --command="SELECT password_hash FROM users
 
 ### activity\_categories
 
-活动分类表，供后台管理和前台活动页面使用。
+为兼容非空的 `activities.category_id` 关系及 v1 API 而保留的内部分类表。公开卡片、文章页和后台表单均不再显示分类。
 
 ### activities
 
-活动主表，包含分类、发布时间、推荐状态、启用状态和浏览量等字段。
+活动主表，包含内部分类引用、发布时间、`featured_image_key`、推荐状态、启用状态和浏览量等字段。特色图片使用 R2 的 `activity-images/` 前缀，并固定显示在活动卡片内容上方。
 
 ### activities\_content
 

@@ -1,0 +1,1 @@
+CREATE UNIQUE INDEX `activity_content_lang_slug_idx` ON `activities_content` (`lang`,`slug`);

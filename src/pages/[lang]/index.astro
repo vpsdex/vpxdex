@@ -6,9 +6,10 @@ import { t } from '../../i18n/utils';
 import { getDb } from '../../lib/db';
 import { getCached, setCache } from '../../lib/cache';
 import { providers, providersContent } from '../../db/schema';
-import { eq, and } from 'drizzle-orm';
+import { eq, and, desc } from 'drizzle-orm';
 import { env } from 'cloudflare:workers';
 import { richTextToPlainText } from '../../lib/rich-text';
+import { isProviderCategory, providerCategories } from '../../lib/provider-categories';
 
 const lang = Astro.params.lang as string;
 if (!isValidLocale(lang)) {
@@ -37,11 +38,15 @@ if (!data) {
       and(eq(providers.id, providersContent.provider_id), eq(providersContent.lang, lang)),
     )
     .where(eq(providers.is_active, true))
-    .orderBy(providers.category, providers.id);
+    .orderBy(providers.category, desc(providers.id));
 
   data = rows;
   await setCache(env.VPSDIR_KV, cacheKey, data);
 }
+
+// Cached payloads created by older deployments may use ascending IDs. Sort again
+// at render time so "latest six" remains correct until those KV entries expire.
+data.sort((left, right) => right.providers.id - left.providers.id);
 
 // Group by category
 const categories = new Map<string, ProviderRow[]>();
@@ -50,12 +55,16 @@ for (const row of data) {
   if (!categories.has(cat)) categories.set(cat, []);
   categories.get(cat)!.push(row);
 }
+const categoryOrder = new Map(providerCategories.map((category, index) => [category, index]));
+const categoryEntries = Array.from(categories.entries()).sort(([left], [right]) =>
+  (categoryOrder.get(left as typeof providerCategories[number]) ?? Number.MAX_SAFE_INTEGER)
+  - (categoryOrder.get(right as typeof providerCategories[number]) ?? Number.MAX_SAFE_INTEGER));
 
-const siteUrl = 'https://vpsdex.com';
+const siteUrl = Astro.site!.href.replace(/\/$/, '');
 const alternates = locales.map((l) => ({ lang: l, href: `${siteUrl}/${l}/` }));
 
 // Prepare data for client-side search
-const providerSearchData = Array.from(categories.entries()).flatMap(([cat, items]) =>
+const providerSearchData = categoryEntries.flatMap(([cat, items]) =>
   items.map(item => ({
     ...item,
     category: cat,
@@ -66,6 +75,36 @@ const providerSearchData = Array.from(categories.entries()).flatMap(([cat, items
         }
       : null,
   })));
+const homepageProviderData = categoryEntries.flatMap(([, items]) => items.slice(0, 6));
+
+const allTags = new Set<string>();
+for (const row of data) {
+  if (!row.providers.tags) continue;
+  try {
+    const parsed = JSON.parse(row.providers.tags);
+    for (const tag of parsed) {
+      const label = typeof tag === 'string' ? tag : tag[lang] || tag.zh || tag.en;
+      if (label) allTags.add(label);
+    }
+  } catch {
+    // Ignore malformed legacy tag JSON rather than breaking the homepage.
+  }
+}
+// Keep the homepage filter focused. Provider records retain their full tags so
+// free-text search and detail pages still expose every useful attribute.
+const selectedTagDefinitions = [
+  { value: '低价VPS', zh: '低价VPS', en: 'Budget VPS' },
+  { value: '美国', zh: '美国', en: 'United States' },
+  { value: '香港', zh: '香港', en: 'Hong Kong' },
+  { value: 'CN2 GIA', zh: 'CN2 GIA', en: 'CN2 GIA' },
+  { value: '中国优化', zh: '中国优化', en: 'China Optimized' },
+  { value: '住宅IP', zh: '住宅IP', en: 'Residential IP' },
+  { value: '原生IP', zh: '原生IP', en: 'Native IP' },
+  { value: 'AMD EPYC', zh: 'AMD EPYC', en: 'AMD EPYC' },
+  { value: 'NVMe', zh: 'NVMe', en: 'NVMe' },
+  { value: 'Windows', zh: 'Windows', en: 'Windows' },
+] as const;
+const homepageTags = selectedTagDefinitions.filter((tag) => allTags.has(tag.value));
 
 const homeJsonLd = {
   '@context': 'https://schema.org',
@@ -92,13 +131,16 @@ const itemListJsonLd = {
   '@context': 'https://schema.org',
   '@type': 'ItemList',
   name: lang === 'zh' ? 'VPSDEX 收录服务商' : 'VPSDEX listed providers',
-  numberOfItems: providerSearchData.length,
-  itemListElement: providerSearchData.slice(0, 30).map((item, i) => ({
-    '@type': 'ListItem',
-    position: i + 1,
-    url: `${siteUrl}/${lang}/provider/${item.providers.slug}/`,
-    name: item.providers.name,
-  })),
+  numberOfItems: homepageProviderData.length,
+  itemListElement: homepageProviderData.map((item, index) => {
+    const slug = lang === 'zh' ? item.providers.slug_zh : item.providers.slug_en;
+    return {
+      '@type': 'ListItem',
+      position: index + 1,
+      url: `${siteUrl}/${lang}/provider/${slug}/`,
+      name: item.providers_content?.name || slug,
+    };
+  }),
 };
 ---
 
@@ -146,7 +188,15 @@ const itemListJsonLd = {
       </button>
     </div>
     <div id="search-tags" class="mt-3 flex flex-wrap gap-2">
-      <!-- Active search tags will appear here -->
+      {homepageTags.map((tag) => (
+        <button
+          type="button"
+          class="text-xs px-3 py-1 tag-chip-btn rounded-full transition-colors"
+          data-tag={tag.value}
+        >
+          {tag[lang]}
+        </button>
+      ))}
     </div>
   </div>
   </section>
@@ -156,14 +206,21 @@ const itemListJsonLd = {
       <p class="text-gray-500 text-center py-12">{t(lang, 'admin.noProviders')}</p>
     )}
 
-  {Array.from(categories.entries()).map(([category, items]) => (
+  {categoryEntries.map(([category, items]) => (
     <section class="mb-12">
       <div class="category-heading">
         <h2 class="text-xl font-semibold text-gray-800">{t(lang, `categories.${category}`)}</h2>
-        <span class="category-count">{items.length} {lang === 'zh' ? '家服务商' : 'providers'}</span>
+        <div class="flex items-center gap-3">
+          <span class="category-count">{items.length} {lang === 'zh' ? '家服务商' : 'providers'}</span>
+          {isProviderCategory(category) && (
+            <a href={`/${lang}/category/${category}/`} class="view-all-link">
+              {lang === 'zh' ? '查看全部' : 'View all'} →
+            </a>
+          )}
+        </div>
       </div>
       <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-        {items.map((row) => (
+        {items.slice(0, 6).map((row) => (
           <ProviderCard
             provider={row.providers}
             content={
@@ -177,12 +234,22 @@ const itemListJsonLd = {
   ))}
   </div>
 
-  <script define:vars={{ data: JSON.stringify(providerSearchData), lang }}>
+  <script define:vars={{
+    data: JSON.stringify(providerSearchData),
+    lang,
+    categoryLabels: JSON.stringify(Object.fromEntries(providerCategories.map((category) => [category, t(lang, `categories.${category}`)]))),
+    categoryPaths: JSON.stringify(Object.fromEntries(providerCategories.map((category) => [category, `/${lang}/category/${category}/`]))),
+    viewAllLabel: lang === 'zh' ? '查看全部' : 'View all',
+    emptyLabel: lang === 'zh' ? '没有找到匹配的服务商' : 'No matching providers found',
+  }}>
     const allProviders = JSON.parse(data);
+    const localizedCategoryLabels = JSON.parse(categoryLabels);
+    const localizedCategoryPaths = JSON.parse(categoryPaths);
     const searchInput = document.getElementById('search-input');
     const searchButton = document.getElementById('search-button');
     const clearButton = document.getElementById('clear-button');
     const searchTags = document.getElementById('search-tags');
+
     const providerContainer = document.getElementById('provider-container');
 
     // Escape HTML to prevent XSS
@@ -285,25 +352,35 @@ const itemListJsonLd = {
       }
 
       if (categories.size === 0) {
-        providerContainer.innerHTML = '<p class="text-gray-500 text-center py-12">没有找到匹配的服务商</p>';
+        providerContainer.innerHTML = `<p class="text-gray-500 text-center py-12">${escapeHtml(emptyLabel)}</p>`;
         return;
       }
 
-      providerContainer.innerHTML = Array.from(categories.entries()).map(([category, items]) => `
+      const shouldLimit = !currentSearch && !currentTagFilter;
+      providerContainer.innerHTML = Array.from(categories.entries()).map(([category, items]) => {
+        const visibleItems = shouldLimit ? items.slice(0, 6) : items;
+        const categoryLabel = localizedCategoryLabels[category] || category;
+        const categoryPath = localizedCategoryPaths[category];
+        return `
         <section class="mb-12">
           <div class="category-heading">
-            <h2 class="text-xl font-semibold text-gray-800">${escapeHtml(category)}</h2>
-            <span class="category-count">${items.length} ${lang === 'zh' ? '家服务商' : 'providers'}</span>
+            <h2 class="text-xl font-semibold text-gray-800">${escapeHtml(categoryLabel)}</h2>
+            <div class="flex items-center gap-3">
+              <span class="category-count">${items.length} ${lang === 'zh' ? '家服务商' : 'providers'}</span>
+              ${categoryPath ? `<a href="${escapeHtml(categoryPath)}" class="text-sm font-medium text-blue-600 hover:text-gray-900">${escapeHtml(viewAllLabel)} →</a>` : ''}
+            </div>
           </div>
           <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-            ${items.map(row => {
+            ${visibleItems.map(row => {
               const content = row.providers_content || { name: row.providers.slug_en, desc: null };
               const tags = parseTags(row.providers.tags);
-              const logoUrl = row.providers.logo_key ? `/api/logo/${escapeHtml(row.providers.logo_key)}` : 'https://via.placeholder.com/48';
+              const logoUrl = row.providers.logo_key
+                ? `/api/logo/${escapeHtml(row.providers.logo_key)}`
+                : 'data:image/svg+xml,%3Csvg xmlns=%22http://www.w3.org/2000/svg%22 width=%2248%22 height=%2248%22 viewBox=%220 0 48 48%22%3E%3Crect width=%2248%22 height=%2248%22 rx=%228%22 fill=%22%23eef2f7%22/%3E%3Cpath d=%22M15 15h18v18H15z%22 fill=%22none%22 stroke=%22%2364748b%22 stroke-width=%222%22/%3E%3Cpath d=%22M19 20h10M19 24h10M19 28h6%22 stroke=%22%2364748b%22 stroke-width=%222%22/%3E%3C/svg%3E';
               const slug = lang === 'zh' ? row.providers.slug_zh : row.providers.slug_en;
 
               return `
-                <a href="/${lang}/provider/${escapeHtml(slug)}" class="provider-card block">
+                <a href="/${lang}/provider/${escapeHtml(slug)}/" class="provider-card block">
                   <div class="flex items-start gap-4">
                     <img src="${escapeHtml(logoUrl)}" alt="${escapeHtml(content.name)}" class="provider-logo w-12 h-12 rounded-lg object-contain flex-shrink-0" loading="lazy" width="48" height="48" />
                     <div class="flex-1 min-w-0">
@@ -328,37 +405,22 @@ const itemListJsonLd = {
             }).join('')}
           </div>
         </section>
-      `).join('');
+      `;
+      }).join('');
     }
 
-    // Extract and display all unique tags (in current language)
-    const allTags = new Set();
-    allProviders.forEach(provider => {
-      const tags = parseTags(provider.providers.tags);
-      tags.forEach(tag => allTags.add(tag));
-    });
-
-    if (allTags.size > 0) {
-      searchTags.innerHTML = Array.from(allTags).map(tag => `
-        <button class="text-xs px-3 py-1 tag-chip-btn rounded-full transition-colors" data-tag="${escapeHtml(tag)}">
-          ${escapeHtml(tag)}
-        </button>
-      `).join('');
-
+    if (searchTags) {
       searchTags.addEventListener('click', function(e) {
         const tagButton = e.target.closest('[data-tag]');
         if (tagButton) {
           const tag = tagButton.dataset.tag;
           currentTagFilter = currentTagFilter === tag ? '' : tag;
-          // 先清除所有按钮的选中态
           searchTags.querySelectorAll('[data-tag]').forEach(btn => btn.classList.remove('is-active'));
-          // 仅给当前选中按钮加选中态
-          if (currentTagFilter) {
-            tagButton.classList.add('is-active');
-          }
+          if (currentTagFilter) tagButton.classList.add('is-active');
           filterProviders();
         }
       });
     }
+
   </script>
 </BaseLayout>

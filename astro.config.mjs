@@ -9,7 +9,7 @@ export default defineConfig({
   // robots.txt 与 sitemap.xml 中的域名需与此保持一致
   site: 'https://vpsdex.com',
   output: 'server',
-  adapter: cloudflare(),
+  adapter: cloudflare({ sessionKVBindingName: 'VPSDIR_KV' }),
   vite: {
     plugins: [tailwindcss()],
   },

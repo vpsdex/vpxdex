@@ -1,7 +1,5 @@
 ---
 import { defaultLocale } from '../i18n/config';
-// 仅裸域根路径 302 到默认语言;其余未知路径(含 /llms.txt 等)一律真 404,
-// 防止软 404 稀释抓取预算(2026-08-20 SEO 审计修复)
 if (Astro.url.pathname === '/' || Astro.url.pathname === '') {
   return Astro.redirect(`/${defaultLocale}/`);
 }

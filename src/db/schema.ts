@@ -66,7 +66,10 @@ export const activitiesContent = sqliteTable(
     created_at: text('created_at').notNull().default(sql`(datetime('now'))`),
     updated_at: text('updated_at').notNull().default(sql`(datetime('now'))`),
   },
-  (table) => [uniqueIndex('activity_lang_idx').on(table.activity_id, table.lang)],
+  (table) => [
+    uniqueIndex('activity_lang_idx').on(table.activity_id, table.lang),
+    uniqueIndex('activity_content_lang_slug_idx').on(table.lang, table.slug),
+  ],
 );
 
 // Activities (活动主表)
@@ -76,6 +79,7 @@ export const activities = sqliteTable('activities', {
     .notNull()
     .references(() => activityCategories.id),
   slug: text('slug').notNull().unique(),
+  featured_image_key: text('featured_image_key'),
   published_at: text('published_at').notNull().default(sql`(datetime('now'))`),
   is_featured: integer('is_featured', { mode: 'boolean' }).notNull().default(false),
   is_active: integer('is_active', { mode: 'boolean' }).notNull().default(true),

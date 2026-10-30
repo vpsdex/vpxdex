@@ -5,6 +5,10 @@ import { activities, activitiesContent, activityCategories } from '../../../../d
 import { eq, and, desc } from 'drizzle-orm';
 import { sanitizeRichText } from '../../../../lib/rich-text';
 import { requireApiAuth, jsonResponse, handleCors } from '../../../../lib/api-auth';
+import {
+  errorMessage, optionalText, RequestValidationError, requireText, validateDate,
+  validateBoolean, validateLocale, validatePositiveInteger, validateSlug,
+} from '../../../../lib/validation';
 
 // GET /api/v1/activities - 列出所有活动
 export const GET: APIRoute = async ({ request }) => {
@@ -18,6 +22,7 @@ export const GET: APIRoute = async ({ request }) => {
     .select({
       id: activities.id,
       slug: activities.slug,
+      featured_image_key: activities.featured_image_key,
       category_id: activities.category_id,
       published_at: activities.published_at,
       is_featured: activities.is_featured,
@@ -42,6 +47,7 @@ export const GET: APIRoute = async ({ request }) => {
     data: rows.map((row) => ({
       id: row.id,
       slug: row.slug,
+      featured_image_key: row.featured_image_key,
       category_id: row.category_id,
       category_slug: row.category_slug || '',
       published_at: row.published_at,
@@ -62,12 +68,32 @@ export const POST: APIRoute = async ({ request }) => {
   const auth = requireApiAuth(request);
   if (auth) return auth;
 
+  let insertedId: number | null = null;
   try {
-    const body = await request.json();
-    const { slug, category_id, published_at, is_featured, is_active, contents } = body;
+    const body = await request.json() as Record<string, unknown>;
+    const { slug, category_id, published_at, is_featured, is_active, featured_image_key, contents } = body;
 
-    if (!slug || !category_id || !contents || !Array.isArray(contents)) {
+    if (!contents || !Array.isArray(contents) || contents.length === 0) {
       return jsonResponse({ error: 'Missing required fields: slug, category_id, contents' }, 400);
+    }
+
+    const normalizedSlug = validateSlug(slug);
+    if (featured_image_key !== undefined && featured_image_key !== null
+      && (typeof featured_image_key !== 'string' || !featured_image_key.startsWith('activity-images/'))) {
+      throw new RequestValidationError('featured_image_key must use the activity-images/ prefix');
+    }
+    const normalizedCategoryId = validatePositiveInteger(category_id, 'category_id');
+    const normalizedContents = contents.map((content: Record<string, unknown>) => ({
+      lang: validateLocale(content.lang),
+      title: requireText(content.title, 'contents.title', 300),
+      slug: validateSlug(content.slug || normalizedSlug, 'contents.slug'),
+      description: optionalText(content.description, 2000),
+      content: sanitizeRichText(optionalText(content.content, 500_000)),
+      meta_title: optionalText(content.meta_title, 200),
+      meta_desc: optionalText(content.meta_desc, 500),
+    }));
+    if (new Set(normalizedContents.map((content) => content.lang)).size !== normalizedContents.length) {
+      return jsonResponse({ error: 'contents contains duplicate languages' }, 400);
     }
 
     const db = getDb(env.DB);
@@ -76,39 +102,42 @@ export const POST: APIRoute = async ({ request }) => {
     const category = await db
       .select()
       .from(activityCategories)
-      .where(eq(activityCategories.id, category_id))
+      .where(eq(activityCategories.id, normalizedCategoryId))
       .get();
     if (!category) {
-      return jsonResponse({ error: `Category id ${category_id} not found` }, 400);
+      return jsonResponse({ error: `Category id ${normalizedCategoryId} not found` }, 400);
     }
 
     const [newActivity] = await db
       .insert(activities)
       .values({
-        slug,
-        category_id,
-        published_at: published_at || new Date().toISOString(),
-        is_featured: is_featured ?? false,
-        is_active: is_active ?? true,
+        slug: normalizedSlug,
+        featured_image_key: featured_image_key as string | null | undefined,
+        category_id: normalizedCategoryId,
+        published_at: validateDate(published_at),
+        is_featured: is_featured === undefined ? false : validateBoolean(is_featured, 'is_featured'),
+        is_active: is_active === undefined ? true : validateBoolean(is_active, 'is_active'),
       })
       .returning();
+    insertedId = newActivity.id;
 
-    for (const c of contents) {
+    for (const c of normalizedContents) {
       await db.insert(activitiesContent).values({
         activity_id: newActivity.id,
-        lang: c.lang,
-        title: c.title,
-        slug: c.slug || slug,
-        description: c.description || null,
-        content: sanitizeRichText(c.content),
-        meta_title: c.meta_title || null,
-        meta_desc: c.meta_desc || null,
+        ...c,
       });
     }
 
     return jsonResponse({ success: true, id: newActivity.id }, 201);
   } catch (error) {
     console.error('API create activity error:', error);
-    return jsonResponse({ error: 'Failed to create activity' }, 500);
+    if (insertedId) {
+      try { await getDb(env.DB).delete(activities).where(eq(activities.id, insertedId)); }
+      catch (cleanupError) { console.error('API activity cleanup error:', cleanupError); }
+    }
+    return jsonResponse(
+      { error: error instanceof RequestValidationError || error instanceof SyntaxError ? errorMessage(error) : 'Failed to create activity' },
+      error instanceof RequestValidationError || error instanceof SyntaxError ? 400 : 500,
+    );
   }
 };

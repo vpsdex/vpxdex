@@ -28,7 +28,7 @@ export function getAlternateUrl(url: URL, targetLocale: Locale): string {
   } else {
     segments.unshift(targetLocale);
   }
-  return `/${segments.join('/')}`;
+  return `/${segments.join('/')}/`;
 }
 
 export function getProviderAlternateUrl(
@@ -37,5 +37,5 @@ export function getProviderAlternateUrl(
   slugEn: string,
 ): string {
   const slug = targetLocale === 'zh' ? slugZh : slugEn;
-  return `/${targetLocale}/provider/${slug}`;
+  return `/${targetLocale}/provider/${slug}/`;
 }

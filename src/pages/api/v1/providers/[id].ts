@@ -6,6 +6,10 @@ import { eq, and } from 'drizzle-orm';
 import { invalidateCache } from '../../../../lib/cache';
 import { sanitizeRichText } from '../../../../lib/rich-text';
 import { requireApiAuth, jsonResponse, handleCors } from '../../../../lib/api-auth';
+import {
+  errorMessage, optionalText, parseStoredTags, RequestValidationError, requireText,
+  serializeTags, validateBoolean, validateHttpUrl, validateLocale, validateRating, validateSlug,
+} from '../../../../lib/validation';
 
 // GET /api/v1/providers/:id - 获取单个服务商详情
 export const GET: APIRoute = async ({ request, params }) => {
@@ -35,7 +39,7 @@ export const GET: APIRoute = async ({ request, params }) => {
       category: provider.category,
       rating: provider.rating,
       logo_key: provider.logo_key,
-      tags: provider.tags ? JSON.parse(provider.tags) : [],
+      tags: parseStoredTags(provider.tags),
       is_active: provider.is_active,
       created_at: provider.created_at,
       updated_at: provider.updated_at,
@@ -61,7 +65,7 @@ export const PUT: APIRoute = async ({ request, params }) => {
   if (!id || isNaN(id)) return jsonResponse({ error: 'Invalid id' }, 400);
 
   try {
-    const body = await request.json();
+    const body = await request.json() as Record<string, unknown>;
     const db = getDb(env.DB);
 
     const existing = await db.select().from(providers).where(eq(providers.id, id)).get();
@@ -69,50 +73,62 @@ export const PUT: APIRoute = async ({ request, params }) => {
 
     const { slug_zh, slug_en, url, category, rating, tags, is_active, logo_key, contents } = body;
 
+    if (logo_key !== undefined && logo_key !== null
+      && (typeof logo_key !== 'string' || !logo_key.startsWith('logos/'))) {
+      throw new RequestValidationError('logo_key must use the logos/ prefix');
+    }
+
     await db
       .update(providers)
       .set({
-        ...(slug_zh !== undefined && { slug_zh }),
-        ...(slug_en !== undefined && { slug_en }),
-        ...(url !== undefined && { url }),
-        ...(category !== undefined && { category }),
-        ...(rating !== undefined && { rating }),
-        ...(tags !== undefined && { tags: JSON.stringify(tags) }),
-        ...(is_active !== undefined && { is_active }),
+        ...(slug_zh !== undefined && { slug_zh: validateSlug(slug_zh, 'slug_zh') }),
+        ...(slug_en !== undefined && { slug_en: validateSlug(slug_en, 'slug_en') }),
+        ...(url !== undefined && { url: validateHttpUrl(url) }),
+        ...(category !== undefined && { category: requireText(category, 'category', 60) }),
+        ...(rating !== undefined && { rating: validateRating(rating) }),
+        ...(tags !== undefined && { tags: serializeTags(tags) }),
+        ...(is_active !== undefined && { is_active: validateBoolean(is_active, 'is_active') }),
         ...(logo_key !== undefined && { logo_key }),
         updated_at: new Date().toISOString(),
       })
       .where(eq(providers.id, id));
 
-    if (contents && Array.isArray(contents)) {
-      for (const c of contents) {
+    if (Array.isArray(contents)) {
+      for (const rawContent of contents) {
+        if (!rawContent || typeof rawContent !== 'object') throw new RequestValidationError('contents entries must be objects');
+        const c = rawContent as Record<string, any>;
+        const lang = validateLocale(c.lang);
         const existingContent = await db
           .select()
           .from(providersContent)
-          .where(and(eq(providersContent.provider_id, id), eq(providersContent.lang, c.lang)))
+          .where(and(eq(providersContent.provider_id, id), eq(providersContent.lang, lang)))
           .get();
 
         if (existingContent) {
           await db
             .update(providersContent)
             .set({
-              name: c.name,
-              desc: sanitizeRichText(c.desc),
-              meta_title: c.meta_title || null,
-              meta_desc: c.meta_desc || null,
+              name: requireText(c.name, 'contents.name', 200),
+              desc: sanitizeRichText(optionalText(c.desc, 100_000)),
+              meta_title: optionalText(c.meta_title, 200),
+              meta_desc: optionalText(c.meta_desc, 500),
             })
             .where(eq(providersContent.id, existingContent.id));
         } else {
           await db.insert(providersContent).values({
             provider_id: id,
-            lang: c.lang,
-            name: c.name,
-            desc: sanitizeRichText(c.desc),
-            meta_title: c.meta_title || null,
-            meta_desc: c.meta_desc || null,
+            lang,
+            name: requireText(c.name, 'contents.name', 200),
+            desc: sanitizeRichText(optionalText(c.desc, 100_000)),
+            meta_title: optionalText(c.meta_title, 200),
+            meta_desc: optionalText(c.meta_desc, 500),
           });
         }
       }
+    }
+
+    if (logo_key !== undefined && existing.logo_key && existing.logo_key !== logo_key) {
+      await env.R2.delete(existing.logo_key);
     }
 
     await invalidateCache(env.VPSDIR_KV, 'home:zh');
@@ -121,7 +137,10 @@ export const PUT: APIRoute = async ({ request, params }) => {
     return jsonResponse({ success: true });
   } catch (error) {
     console.error('API update provider error:', error);
-    return jsonResponse({ error: 'Failed to update provider' }, 500);
+    return jsonResponse(
+      { error: error instanceof RequestValidationError || error instanceof SyntaxError ? errorMessage(error) : 'Failed to update provider' },
+      error instanceof RequestValidationError || error instanceof SyntaxError ? 400 : 500,
+    );
   }
 };
 
@@ -139,10 +158,8 @@ export const DELETE: APIRoute = async ({ request, params }) => {
   const existing = await db.select({ logo_key: providers.logo_key }).from(providers).where(eq(providers.id, id)).get();
   if (!existing) return jsonResponse({ error: 'Provider not found' }, 404);
 
-  if (existing.logo_key) {
-    await env.R2.delete(existing.logo_key);
-  }
   await db.delete(providers).where(eq(providers.id, id));
+  if (existing.logo_key) await env.R2.delete(existing.logo_key);
 
   await invalidateCache(env.VPSDIR_KV, 'home:zh');
   await invalidateCache(env.VPSDIR_KV, 'home:en');

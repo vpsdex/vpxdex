@@ -22,7 +22,7 @@ const error = Astro.url.searchParams.get('error');
 
         {error && (
           <div class="admin-alert admin-alert-error">
-            {error === 'invalid' ? '用户名或密码错误' : '登录失败'}
+            {error === 'invalid' ? '用户名或密码错误' : error === 'rate_limited' ? '尝试次数过多，请 15 分钟后再试' : '登录失败'}
           </div>
         )}
 

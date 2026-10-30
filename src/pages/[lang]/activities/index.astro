@@ -2,95 +2,110 @@
 import '../../../styles/global.css';
 import Header from '../../../components/Header.astro';
 import Footer from '../../../components/Footer.astro';
+import Pagination from '../../../components/Pagination.astro';
 import { t } from '../../../i18n/utils';
-import type { Locale } from '../../../i18n/config';
-import { isValidLocale, locales } from '../../../i18n/config';
+import { isValidLocale, locales, type Locale } from '../../../i18n/config';
 import { getDb } from '../../../lib/db';
-import { activities, activitiesContent, activityCategories } from '../../../db/schema';
-import { eq, and, desc } from 'drizzle-orm';
+import { activities, activitiesContent } from '../../../db/schema';
+import { and, count, desc, eq } from 'drizzle-orm';
 import { env } from 'cloudflare:workers';
 import { richTextToPlainText } from '../../../lib/rich-text';
+import { getActivityImageUrl } from '../../../lib/r2';
 
-const lang = Astro.params.lang as string;
-if (!isValidLocale(lang)) {
-  return Astro.redirect('/zh/activities/');
+const langParam = Astro.params.lang as string;
+if (!isValidLocale(langParam)) return Astro.redirect('/zh/activities/');
+const lang = langParam as Locale;
+const db = getDb(env.DB);
+const pageSize = 12;
+const pageParam = Astro.url.searchParams.get('page');
+const categoryParam = Astro.url.searchParams.get('category');
+const currentPage = pageParam && /^\d+$/.test(pageParam) ? Number(pageParam) : 1;
+
+if (categoryParam) {
+  return Astro.redirect(
+    `/${lang}/activities/${currentPage > 1 ? `?page=${currentPage}` : ''}`,
+    301,
+  );
 }
 
-const db = getDb(env.DB);
+const basePath = `/${lang}/activities/`;
+const pageHref = (page: number) => {
+  const params = new URLSearchParams();
+  if (page > 1) params.set('page', String(page));
+  const search = params.toString();
+  return `${basePath}${search ? `?${search}` : ''}`;
+};
 
-// Get categories
-const categories = await db
-  .select()
-  .from(activityCategories)
-  .orderBy(activityCategories.sort_order);
+if (currentPage < 1 || (pageParam !== null && (currentPage === 1 || !/^\d+$/.test(pageParam)))) {
+  return Astro.redirect(pageHref(1), 301);
+}
 
-// Get published activities with content and category via JOINs
-const activityRows = await db
-  .select({
-    id: activities.id,
-    slug: activitiesContent.slug,
-    fallbackSlug: activities.slug,
-    categoryId: activities.category_id,
-    publishedAt: activities.published_at,
-    isFeatured: activities.is_featured,
-    viewCount: activities.view_count,
-    title: activitiesContent.title,
-    description: activitiesContent.description,
-    content: activitiesContent.content,
-    categorySlug: activityCategories.slug,
-    categoryIcon: activityCategories.icon,
-  })
-  .from(activities)
-  .leftJoin(
-    activitiesContent,
-    and(eq(activitiesContent.activity_id, activities.id), eq(activitiesContent.lang, lang)),
-  )
-  .leftJoin(activityCategories, eq(activities.category_id, activityCategories.id))
-  .where(eq(activities.is_active, true))
+const whereClause = eq(activities.is_active, true);
+const [{ total }] = await db.select({ total: count() }).from(activities).where(whereClause);
+const totalPages = Math.max(1, Math.ceil(total / pageSize));
+if (currentPage > totalPages) {
+  return Astro.redirect(pageHref(totalPages), 302);
+}
+
+const activityRows = await db.select({
+  id: activities.id,
+  slug: activitiesContent.slug,
+  fallbackSlug: activities.slug,
+  featuredImageKey: activities.featured_image_key,
+  publishedAt: activities.published_at,
+  isFeatured: activities.is_featured,
+  viewCount: activities.view_count,
+  title: activitiesContent.title,
+  description: activitiesContent.description,
+  content: activitiesContent.content,
+}).from(activities).leftJoin(
+  activitiesContent,
+  and(eq(activitiesContent.activity_id, activities.id), eq(activitiesContent.lang, lang)),
+).where(whereClause)
   .orderBy(desc(activities.is_featured), desc(activities.published_at))
-  .limit(50);
+  .limit(pageSize)
+  .offset((currentPage - 1) * pageSize);
 
 const allActivities = activityRows.map((row) => ({
   id: row.id,
   slug: row.slug || row.fallbackSlug,
-  categoryId: row.categoryId,
+  featuredImage: getActivityImageUrl(row.featuredImageKey),
   publishedAt: row.publishedAt,
   isFeatured: row.isFeatured,
   viewCount: row.viewCount,
-  title: row.title || '',
+  title: row.title || row.fallbackSlug,
   description: row.description || '',
   content: row.content || '',
-  categorySlug: row.categorySlug || '',
-  categoryIcon: row.categoryIcon || '',
 }));
 
 const siteName = t(lang, 'site.brand');
-const pageTitle = lang === 'zh' ? '最新活动' : 'Latest Activities';
+const paginationTitle = currentPage > 1 ? (lang === 'zh' ? ` - 第 ${currentPage} 页` : ` - Page ${currentPage}`) : '';
+const pageTitle = lang === 'zh'
+  ? `VPS评测、优惠与选购指南${paginationTitle}`
+  : `VPS Reviews & Hosting Guides: 2026 Tests & Deals${paginationTitle}`;
 const pageDesc = lang === 'zh'
-  ? '查看最新的VPS优惠活动、产品更新和行业资讯'
-  : 'Check out the latest VPS deals, product updates, and industry news';
-const siteUrl = 'https://vpsdex.com';
-const alternates = locales.map((l) => ({ lang: l, href: `${siteUrl}/${l}/activities/` }));
-
-// 构建结构化数据对象，渲染时用 JSON.stringify 序列化为合法 JSON-LD
+  ? '查看 VPS 主机评测、优惠活动、产品更新、线路分析与选购指南，了解价格、适用场景和重要限制。'
+  : 'Independent VPS reviews and verified deals for 2026: hosting tests, CN2/9929 routing analysis, pricing context and the limits to check before buying.';
+const siteUrl = Astro.site!.href.replace(/\/$/, '');
+const canonicalUrl = `${siteUrl}${pageHref(currentPage)}`;
+const alternateSuffix = canonicalUrl.slice(`${siteUrl}${basePath}`.length);
+const alternates = locales.map((locale) => ({ lang: locale, href: `${siteUrl}/${locale}/activities/${alternateSuffix}` }));
+const prevUrl = currentPage > 1 ? `${siteUrl}${pageHref(currentPage - 1)}` : undefined;
+const nextUrl = currentPage < totalPages ? `${siteUrl}${pageHref(currentPage + 1)}` : undefined;
+const socialImage = allActivities.find((item) => item.featuredImage)?.featuredImage;
+const absoluteSocialImage = socialImage ? `${siteUrl}${socialImage}` : `${siteUrl}/favicon.svg`;
 const jsonLd = {
-  '@context': 'https://schema.org',
-  '@type': 'CollectionPage',
-  name: pageTitle,
-  description: pageDesc,
-  url: `${siteUrl}/${lang}/activities/`,
+  '@context': 'https://schema.org', '@type': 'CollectionPage', name: pageTitle, description: pageDesc,
+  url: canonicalUrl, inLanguage: lang,
   mainEntity: {
-    '@type': 'ItemList',
+    '@type': 'ItemList', numberOfItems: total,
     itemListElement: allActivities.map((activity, index) => ({
-      '@type': 'ListItem',
-      position: index + 1,
+      '@type': 'ListItem', position: (currentPage - 1) * pageSize + index + 1,
       item: {
-        '@type': 'Article',
-        headline: activity.title,
+        '@type': 'Article', headline: activity.title,
         description: activity.description || richTextToPlainText(activity.content).slice(0, 160),
-        url: `${siteUrl}/${lang}/activity/${activity.slug}/`,
-        datePublished: activity.publishedAt,
-        genre: activity.categorySlug,
+        url: `${siteUrl}/${lang}/activity/${activity.slug}/`, datePublished: activity.publishedAt,
+        ...(activity.featuredImage && { image: `${siteUrl}${activity.featuredImage}` }),
       },
     })),
   },
@@ -105,195 +120,84 @@ const jsonLd = {
     <title>{pageTitle} - {siteName}</title>
     <meta name="description" content={pageDesc} />
     <meta name="robots" content="index, follow" />
-    <link rel="canonical" href={`${siteUrl}/${lang}/activities/`} />
-
-    <!-- Open Graph -->
+    <link rel="canonical" href={canonicalUrl} />
+    {prevUrl && <link rel="prev" href={prevUrl} />}
+    {nextUrl && <link rel="next" href={nextUrl} />}
     <meta property="og:title" content={`${pageTitle} - ${siteName}`} />
     <meta property="og:description" content={pageDesc} />
     <meta property="og:type" content="website" />
-    <meta property="og:url" content={`${siteUrl}/${lang}/activities/`} />
+    <meta property="og:url" content={canonicalUrl} />
     <meta property="og:site_name" content={siteName} />
     <meta property="og:locale" content={lang === 'zh' ? 'zh_CN' : 'en_US'} />
-
-    <!-- Twitter Card -->
-    <meta name="twitter:card" content="summary" />
+    <meta property="og:image" content={absoluteSocialImage} />
+    <meta name="twitter:card" content="summary_large_image" />
     <meta name="twitter:title" content={`${pageTitle} - ${siteName}`} />
     <meta name="twitter:description" content={pageDesc} />
-
-    <!-- Hreflang -->
+    <meta name="twitter:image" content={absoluteSocialImage} />
     {alternates.map((alt) => <link rel="alternate" hreflang={alt.lang} href={alt.href} />)}
-    <link rel="alternate" hreflang="x-default" href={`${siteUrl}/zh/activities/`} />
-
-    <!-- Schema.org structured data -->
+    <link rel="alternate" hreflang="x-default" href={`${siteUrl}/zh/activities/${alternateSuffix}`} />
     <script type="application/ld+json" set:html={JSON.stringify(jsonLd)} />
   </head>
   <body class="min-h-screen bg-gray-50 text-gray-900 flex flex-col">
-    <Header lang={lang} />
-
+    <Header lang={lang} alternates={alternates} />
     <main class="site-main flex-1 mx-auto px-5 sm:px-6 py-8">
-      <!-- Hero Section -->
       <div class="home-hero text-center mb-6">
         <p class="eyebrow">{lang === 'zh' ? '行业动态' : 'Market updates'}</p>
         <h1 class="text-4xl font-bold mt-3 mb-4 tracking-tight">{pageTitle}</h1>
-        <p class="text-base leading-7 text-gray-600 max-w-2xl mx-auto">
-          {pageDesc}
-        </p>
+        <p class="text-base leading-7 text-gray-600 max-w-2xl mx-auto">{pageDesc}</p>
       </div>
 
-      <!-- Category Filter -->
-      <div id="category-filter" class="flex flex-wrap justify-center gap-2 mb-8">
-        <button type="button" class="category-filter-btn is-active" data-category="all" aria-pressed="true">
-          {lang === 'zh' ? '全部' : 'All'}
-        </button>
-        {categories.map((cat) => (
-          <button type="button" class="category-filter-btn" data-category={cat.slug} aria-pressed="false">
-            {cat.slug}
-          </button>
-        ))}
-      </div>
-
-      <!-- Activities Grid -->
-      <div id="activities-grid" class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-        {allActivities.map((activity) => (
-          <article
-            class="activity-card bg-white border border-gray-200 overflow-hidden"
-            data-activity-card
-            data-activity-category={activity.categorySlug}
-          >
-            <div class="p-6">
-              <div class="flex items-center gap-2 mb-3">
-                <span class="tag-chip rounded-full px-2 py-1 text-xs">
-                  {activity.categorySlug}
-                </span>
-                {activity.isFeatured && (
-                  <span class="text-xs text-yellow-600">⭐ {lang === 'zh' ? '推荐' : 'Featured'}</span>
-                )}
-              </div>
-
-              <h2 class="text-xl font-semibold mb-3 line-clamp-2">
-                <a href={`/${lang}/activity/${activity.slug}/`} class="hover:text-blue-600 transition-colors">
-                  {activity.title}
+      <div class="mb-5 text-sm text-gray-500">{lang === 'zh' ? `共 ${total} 条活动` : `${total} activities`}</div>
+      {allActivities.length > 0 ? (
+        <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+          {allActivities.map((activity) => (
+            <article class="activity-card bg-white border border-gray-200 overflow-hidden">
+              {activity.featuredImage && (
+                <a
+                  href={`/${lang}/activity/${activity.slug}/`}
+                  class="activity-card-media block overflow-hidden bg-gray-100"
+                  aria-label={activity.title}
+                >
+                  <img
+                    src={activity.featuredImage}
+                    alt={activity.title}
+                    width="720"
+                    height="405"
+                    loading="lazy"
+                    class="block aspect-video w-full object-cover transition-transform duration-300"
+                  />
                 </a>
-              </h2>
-
-              <p class="text-gray-600 text-sm mb-4 line-clamp-3">
-                {activity.description || richTextToPlainText(activity.content).slice(0, 150)}...
-              </p>
-
-              <div class="flex items-center justify-between text-xs text-gray-500">
-                <time datetime={activity.publishedAt}>
-                  {new Date(activity.publishedAt).toLocaleDateString(lang === 'zh' ? 'zh-CN' : 'en-US')}
-                </time>
-                <span>{activity.viewCount} {lang === 'zh' ? '次浏览' : 'views'}</span>
+              )}
+              <div class="activity-card-body p-6">
+                {activity.isFeatured && (
+                  <div class="mb-3 text-xs text-yellow-600">⭐ {lang === 'zh' ? '推荐' : 'Featured'}</div>
+                )}
+                <h2 class="text-xl font-semibold mb-3 line-clamp-2">
+                  <a href={`/${lang}/activity/${activity.slug}/`} class="hover:text-blue-600 transition-colors">{activity.title}</a>
+                </h2>
+                <p class="text-gray-600 text-sm mb-4 line-clamp-3">
+                  {activity.description || richTextToPlainText(activity.content).slice(0, 150)}
+                </p>
+                <div class="activity-card-meta flex items-center justify-between text-xs text-gray-500">
+                  <time datetime={activity.publishedAt}>{new Date(activity.publishedAt).toLocaleDateString(lang === 'zh' ? 'zh-CN' : 'en-US')}</time>
+                  <span>{activity.viewCount} {lang === 'zh' ? '次浏览' : 'views'}</span>
+                </div>
               </div>
-            </div>
-          </article>
-        ))}
-      </div>
-
-      <div id="filtered-empty" class="text-center py-12 hidden">
-        <p class="text-gray-500">{lang === 'zh' ? '该分类暂无活动' : 'No activities in this category'}</p>
-      </div>
-
-      {allActivities.length === 0 && (
-        <div class="text-center py-12">
-          <p class="text-gray-500">{lang === 'zh' ? '暂无活动' : 'No activities yet'}</p>
+            </article>
+          ))}
         </div>
+      ) : (
+        <div class="text-center py-12 text-gray-500">{lang === 'zh' ? '暂无活动' : 'No activities yet'}</div>
       )}
+      <Pagination currentPage={currentPage} totalPages={totalPages} basePath={basePath} lang={lang} />
     </main>
-
     <Footer lang={lang} />
-    <script>
-      const filterBar = document.getElementById('category-filter');
-      const filterButtons = Array.from(document.querySelectorAll('.category-filter-btn[data-category]'));
-      const activityCards = Array.from(document.querySelectorAll('[data-activity-card]'));
-      const filteredEmpty = document.getElementById('filtered-empty');
-
-      function applyCategoryFilter(category) {
-        let visibleCount = 0;
-
-        for (const button of filterButtons) {
-          const isActive = button.dataset.category === category;
-          button.classList.toggle('is-active', isActive);
-          button.setAttribute('aria-pressed', String(isActive));
-        }
-
-        for (const card of activityCards) {
-          const matches = category === 'all' || card.dataset.activityCategory === category;
-          card.hidden = !matches;
-          if (matches) visibleCount += 1;
-        }
-
-        if (filteredEmpty) {
-          filteredEmpty.classList.toggle('hidden', visibleCount !== 0);
-        }
-      }
-
-      filterBar?.addEventListener('click', (event) => {
-        const button = event.target.closest('[data-category]');
-        if (!button) return;
-
-        const category = button.dataset.category || 'all';
-        applyCategoryFilter(category);
-
-        const url = new URL(window.location.href);
-        if (category === 'all') {
-          url.searchParams.delete('category');
-        } else {
-          url.searchParams.set('category', category);
-        }
-        window.history.replaceState({}, '', url);
-      });
-
-      const initialCategory = new URLSearchParams(window.location.search).get('category');
-      if (initialCategory && filterButtons.some((button) => button.dataset.category === initialCategory)) {
-        applyCategoryFilter(initialCategory);
-      }
-    </script>
   </body>
 </html>
 
 <style>
-  .category-filter-btn {
-    border: 1px solid var(--theme-border);
-    border-radius: 999px;
-    background-color: #fff;
-    color: #374151;
-    font-size: 0.875rem;
-    font-weight: 600;
-    line-height: 1.25rem;
-    padding: 0.5rem 1rem;
-    transition:
-      background-color 0.15s ease,
-      border-color 0.15s ease,
-      color 0.15s ease,
-      box-shadow 0.15s ease;
-  }
-
-  .category-filter-btn:hover {
-    border-color: var(--theme-primary);
-    color: var(--theme-primary);
-    background-color: var(--theme-primary-soft);
-  }
-
-  .category-filter-btn.is-active {
-    border-color: var(--theme-primary);
-    background-color: var(--theme-primary);
-    color: #fff;
-    box-shadow: 0 4px 12px color-mix(in srgb, var(--theme-primary) 22%, transparent);
-  }
-
-  .line-clamp-2 {
-    display: -webkit-box;
-    -webkit-line-clamp: 2;
-    -webkit-box-orient: vertical;
-    overflow: hidden;
-  }
-
-  .line-clamp-3 {
-    display: -webkit-box;
-    -webkit-line-clamp: 3;
-    -webkit-box-orient: vertical;
-    overflow: hidden;
-  }
+  .activity-card:hover .activity-card-media img { transform: scale(1.035); }
+  .line-clamp-2, .line-clamp-3 { display:-webkit-box; -webkit-box-orient:vertical; overflow:hidden; }
+  .line-clamp-2 { -webkit-line-clamp:2; }
+  .line-clamp-3 { -webkit-line-clamp:3; }
 </style>

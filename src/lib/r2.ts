@@ -19,3 +19,7 @@ export function getLogoUrl(key: string | null, updatedAt?: string | null): strin
   const timestamp = updatedAt ? `?v=${new Date(updatedAt).getTime()}` : '';
   return `/api/logo/${key}${timestamp}`;
 }
+
+export function getActivityImageUrl(key: string | null): string | null {
+  return key ? `/api/image/${key}` : null;
+}

@@ -6,9 +6,10 @@ import AdminFormPage from '../../../../components/AdminFormPage.astro';
 import { t } from '../../../../i18n/utils';
 import type { Locale } from '../../../../i18n/config';
 import { getDb } from '../../../../lib/db';
-import { activities, activitiesContent, activityCategories } from '../../../../db/schema';
+import { activities, activitiesContent } from '../../../../db/schema';
 import { eq, and } from 'drizzle-orm';
 import { env } from 'cloudflare:workers';
+import { getActivityImageUrl } from '../../../../lib/r2';
 
 const lang: Locale = 'zh';
 const db = getDb(env.DB);
@@ -31,7 +32,7 @@ const contentEn = await db
   .where(and(eq(activitiesContent.activity_id, id), eq(activitiesContent.lang, 'en')))
   .get();
 
-const categories = await db.select().from(activityCategories).orderBy(activityCategories.sort_order);
+const featuredImageUrl = getActivityImageUrl(activity.featured_image_key);
 ---
 
 <!doctype html>
@@ -71,29 +72,34 @@ const categories = await db.select().from(activityCategories).orderBy(activityCa
             <input type="text" name="slug" required value={activity.slug} class="admin-input" />
           </div>
           <div>
-            <label class="admin-label">分类</label>
-            <select name="category_id" required class="admin-input">
-              {categories.map((cat) => (
-                <option value={cat.id} selected={cat.id === activity.categoryId}>
-                  {cat.slug}
-                </option>
-              ))}
-            </select>
-          </div>
-          <div>
             <label class="admin-label">发布时间</label>
-            <input type="datetime-local" name="published_at" value={activity.publishedAt.slice(0, 16)} class="admin-input" />
+            <input type="datetime-local" name="published_at" value={activity.published_at.slice(0, 16)} class="admin-input" />
           </div>
           <div class="flex items-end gap-4">
             <label class="admin-checkbox-row">
-              <input type="checkbox" name="is_featured" value="1" checked={activity.isFeatured} class="admin-checkbox" />
+              <input type="checkbox" name="is_featured" value="1" checked={activity.is_featured} class="admin-checkbox" />
               <span class="admin-checkbox-label">推荐活动</span>
             </label>
             <label class="admin-checkbox-row">
-              <input type="checkbox" name="is_active" value="1" checked={activity.isActive} class="admin-checkbox" />
+              <input type="checkbox" name="is_active" value="1" checked={activity.is_active} class="admin-checkbox" />
               <span class="admin-checkbox-label">已发布</span>
             </label>
           </div>
+      </div>
+
+      <div>
+        <label class="admin-label">特色图片</label>
+        {featuredImageUrl && (
+          <img src={featuredImageUrl} alt="当前特色图片" class="mb-3 aspect-video w-full max-w-lg rounded-lg border border-gray-200 object-cover" />
+        )}
+        <input type="file" name="featured_image" accept="image/jpeg,image/png,image/gif,image/webp,image/svg+xml" class="admin-input" />
+        <p class="admin-help-text">上传新图片会替换当前图片；支持 JPG、PNG、GIF、WebP、SVG，最大 5MB。</p>
+        {featuredImageUrl && (
+          <label class="admin-checkbox-row mt-2">
+            <input type="checkbox" name="remove_featured_image" value="1" class="admin-checkbox" />
+            <span class="admin-checkbox-label">移除当前特色图片</span>
+          </label>
+        )}
       </div>
 
       <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
@@ -147,19 +153,19 @@ const categories = await db.select().from(activityCategories).orderBy(activityCa
       <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
           <div>
             <label class="admin-label">SEO 标题 (中文)</label>
-            <input type="text" name="meta_title_zh" value={contentZh?.metaTitle || ''} class="admin-input" placeholder="留空使用活动标题" />
+            <input type="text" name="meta_title_zh" value={contentZh?.meta_title || ''} class="admin-input" placeholder="留空使用活动标题" />
           </div>
           <div>
             <label class="admin-label">SEO Title (EN)</label>
-            <input type="text" name="meta_title_en" value={contentEn?.metaTitle || ''} class="admin-input" placeholder="Leave empty to use activity title" />
+            <input type="text" name="meta_title_en" value={contentEn?.meta_title || ''} class="admin-input" placeholder="Leave empty to use activity title" />
           </div>
           <div>
             <label class="admin-label">SEO 描述 (中文)</label>
-            <input type="text" name="meta_desc_zh" value={contentZh?.metaDesc || ''} class="admin-input" placeholder="留空使用简短描述" />
+            <input type="text" name="meta_desc_zh" value={contentZh?.meta_desc || ''} class="admin-input" placeholder="留空使用简短描述" />
           </div>
           <div>
             <label class="admin-label">SEO Description (EN)</label>
-            <input type="text" name="meta_desc_en" value={contentEn?.metaDesc || ''} class="admin-input" placeholder="Leave empty to use short description" />
+            <input type="text" name="meta_desc_en" value={contentEn?.meta_desc || ''} class="admin-input" placeholder="Leave empty to use short description" />
           </div>
       </div>
 
@@ -177,6 +183,7 @@ const categories = await db.select().from(activityCategories).orderBy(activityCa
     </AdminFormPage>
 
     <script>
+      // @ts-nocheck -- legacy DOM script; server and module code remain strictly checked.
       import { initAdminRichTextEditors } from '../../../../scripts/admin-rich-text';
       initAdminRichTextEditors();
 

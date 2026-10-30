@@ -10,11 +10,14 @@ const { lang } = Astro.props;
 const currentYear = new Date().getFullYear();
 ---
 
-<footer class="site-nav border-t py-10 mt-16">
+<footer class="site-footer border-t py-12 mt-20">
   <div class="site-shell mx-auto px-5 sm:px-6">
-    <div class="grid grid-cols-1 md:grid-cols-3 gap-8 mb-8">
+    <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-8 mb-8">
       <div>
-        <h3 class="font-semibold mb-4">{t(lang, 'site.brand')}</h3>
+        <div class="flex items-center gap-2.5 mb-4">
+          <span class="brand-mark" aria-hidden="true">V</span>
+          <h3 class="font-semibold">{t(lang, 'site.brand')}</h3>
+        </div>
         <p class="nav-subtitle text-sm">{t(lang, 'site.description')}</p>
       </div>
       <div>
@@ -34,12 +37,22 @@ const currentYear = new Date().getFullYear();
       </div>
       <div>
         <h3 class="font-semibold mb-4">{lang === 'zh' ? '关于' : 'About'}</h3>
-        <p class="nav-subtitle text-sm">
-          {lang === 'zh' ? '为您推荐最佳的VPS和服务商' : 'Recommending the best VPS and service providers for you'}
-        </p>
+        <ul class="space-y-2">
+          <li><a href={`/${lang}/about/`} class="nav-link text-sm">{lang === 'zh' ? '关于我们' : 'About us'}</a></li>
+          <li><a href={`/${lang}/methodology/`} class="nav-link text-sm">{lang === 'zh' ? '评测方法' : 'Review methodology'}</a></li>
+          <li><a href={`/${lang}/disclosure/`} class="nav-link text-sm">{lang === 'zh' ? '商业披露' : 'Commercial disclosure'}</a></li>
+          <li><a href={`/${lang}/contact/`} class="nav-link text-sm">{lang === 'zh' ? '联系与纠错' : 'Contact & corrections'}</a></li>
+        </ul>
+      </div>
+      <div>
+        <h3 class="font-semibold mb-4">{lang === 'zh' ? '政策' : 'Policies'}</h3>
+        <ul class="space-y-2">
+          <li><a href={`/${lang}/privacy/`} class="nav-link text-sm">{lang === 'zh' ? '隐私政策' : 'Privacy policy'}</a></li>
+          <li><a href={`/${lang}/terms/`} class="nav-link text-sm">{lang === 'zh' ? '使用条款' : 'Terms of use'}</a></li>
+        </ul>
       </div>
     </div>
-    <div class="pt-8 border-t border-gray-200 text-center">
+    <div class="pt-7 border-t footer-divider text-center">
       <p class="nav-subtitle text-sm">
         &copy; {currentYear} {t(lang, 'site.brand')}. {lang === 'zh' ? '保留所有权利。' : 'All rights reserved.'}
       </p>

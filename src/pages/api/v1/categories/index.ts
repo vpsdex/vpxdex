@@ -4,6 +4,7 @@ import { getDb } from '../../../../lib/db';
 import { activityCategories, activities } from '../../../../db/schema';
 import { eq } from 'drizzle-orm';
 import { requireApiAuth, jsonResponse, handleCors } from '../../../../lib/api-auth';
+import { errorMessage, optionalText, RequestValidationError, validateSlug } from '../../../../lib/validation';
 
 // GET /api/v1/categories - 列出所有分类
 export const GET: APIRoute = async ({ request }) => {
@@ -39,11 +40,13 @@ export const POST: APIRoute = async ({ request }) => {
   if (auth) return auth;
 
   try {
-    const body = await request.json();
+    const body = await request.json() as Record<string, unknown>;
     const { slug, icon, sort_order } = body;
 
-    if (!slug) {
-      return jsonResponse({ error: 'Missing required field: slug' }, 400);
+    const normalizedSlug = validateSlug(slug);
+    const normalizedSortOrder = sort_order == null ? 0 : Number(sort_order);
+    if (!Number.isInteger(normalizedSortOrder)) {
+      throw new RequestValidationError('sort_order must be an integer');
     }
 
     const db = getDb(env.DB);
@@ -52,24 +55,27 @@ export const POST: APIRoute = async ({ request }) => {
     const existing = await db
       .select({ id: activityCategories.id })
       .from(activityCategories)
-      .where(eq(activityCategories.slug, slug))
+      .where(eq(activityCategories.slug, normalizedSlug))
       .get();
     if (existing) {
-      return jsonResponse({ error: `Category slug "${slug}" already exists` }, 409);
+      return jsonResponse({ error: `Category slug "${normalizedSlug}" already exists` }, 409);
     }
 
     const [newCategory] = await db
       .insert(activityCategories)
       .values({
-        slug,
-        icon: icon || null,
-        sort_order: sort_order ?? 0,
+        slug: normalizedSlug,
+        icon: optionalText(icon, 20),
+        sort_order: normalizedSortOrder,
       })
       .returning();
 
     return jsonResponse({ success: true, id: newCategory.id }, 201);
   } catch (error) {
     console.error('API create category error:', error);
-    return jsonResponse({ error: 'Failed to create category' }, 500);
+    return jsonResponse(
+      { error: error instanceof RequestValidationError || error instanceof SyntaxError ? errorMessage(error) : 'Failed to create category' },
+      error instanceof RequestValidationError || error instanceof SyntaxError ? 400 : 500,
+    );
   }
 };

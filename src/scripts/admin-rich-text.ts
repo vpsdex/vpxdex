@@ -10,7 +10,7 @@ type ToolbarAction = {
   group: 'format' | 'insert';
   variant?: 'default' | 'accent';
   isActive?: (editor: Editor) => boolean;
-  run: (editor: Editor) => void | Promise<void>;
+  run: (editor: Editor) => void | boolean | Promise<void>;
 };
 
 const STYLE_ID = 'admin-rich-text-styles';
@@ -255,7 +255,7 @@ async function uploadImage(file: File): Promise<string> {
     body: formData,
   });
 
-  const result = await response.json();
+  const result = await response.json() as { url?: string; error?: string };
   if (!response.ok || !result?.url) {
     throw new Error(result?.error || 'Image upload failed');
   }

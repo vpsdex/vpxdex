@@ -14,12 +14,27 @@ export const POST: APIRoute = async ({ request, cookies, redirect }) => {
     return redirect('/admin/login?error=invalid');
   }
 
+  if (!env.ADMIN_SESSION_SECRET) {
+    console.error('ADMIN_SESSION_SECRET is not configured');
+    return new Response('Authentication is not configured', { status: 503 });
+  }
+
+  const clientIp = request.headers.get('CF-Connecting-IP') || 'unknown';
+  const rateLimitKey = `auth:login:${clientIp}:${username.trim().toLowerCase()}`;
+  const failedAttempts = Number(await env.VPSDIR_KV.get(rateLimitKey)) || 0;
+  if (failedAttempts >= 5) {
+    return redirect('/admin/login?error=rate_limited');
+  }
+
   // Verify credentials
   const db = getDb(env.DB);
   const user = await db.select().from(users).where(eq(users.username, username)).get();
   if (!user || !(await verifyPassword(password, user.password_hash))) {
+    await env.VPSDIR_KV.put(rateLimitKey, String(failedAttempts + 1), { expirationTtl: 15 * 60 });
     return redirect('/admin/login?error=invalid');
   }
+
+  await env.VPSDIR_KV.delete(rateLimitKey);
 
   // Create session
   const token = await createSession(user.id, env.ADMIN_SESSION_SECRET);

@@ -4,13 +4,15 @@ interface Props {
   description?: string;
   alternates?: { lang: string; href: string }[];
   jsonLd?: Record<string, unknown>;
+  xDefault?: string;
+  canonical?: string;
+  prev?: string;
+  next?: string;
 }
 
-const { title, description, alternates, jsonLd } = Astro.props;
-// SEO: canonical must be the clean production URL — strip any query string
-// (utm params etc.) and force the public hostname so preview origins never leak.
-const siteUrl = 'https://vpsdex.com';
-const canonicalUrl = `${siteUrl}${Astro.url.pathname}`;
+const { title, description, alternates, jsonLd, xDefault, canonical, prev, next } = Astro.props;
+const siteUrl = Astro.site!.href.replace(/\/$/, '');
+const canonicalUrl = canonical || `${siteUrl}${Astro.url.pathname}`;
 const siteName = 'VPSDEX';
 const ogImage = `${siteUrl}/favicon.svg`;
 ---
@@ -18,6 +20,8 @@ const ogImage = `${siteUrl}/favicon.svg`;
 <title>{title}</title>
 <meta name="description" content={description || ''} />
 <link rel="canonical" href={canonicalUrl} />
+{prev && <link rel="prev" href={prev} />}
+{next && <link rel="next" href={next} />}
 <meta name="generator" content={Astro.generator} />
 
 <!-- Open Graph -->
@@ -37,6 +41,6 @@ const ogImage = `${siteUrl}/favicon.svg`;
 
 <!-- Hreflang -->
 {alternates?.map((alt) => <link rel="alternate" hreflang={alt.lang} href={alt.href} />)}
-<link rel="alternate" hreflang="x-default" href={`${siteUrl}/zh/`} />
+<link rel="alternate" hreflang="x-default" href={xDefault || `${siteUrl}/zh/`} />
 
 {jsonLd && <script type="application/ld+json" set:html={JSON.stringify(jsonLd)} />}

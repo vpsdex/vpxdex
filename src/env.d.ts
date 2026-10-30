@@ -9,9 +9,8 @@ interface CloudflareEnv {
   API_BEARER_TOKEN: string;
 }
 
-declare module 'cloudflare:workers' {
-  const env: CloudflareEnv;
-  export { env };
+declare namespace Cloudflare {
+  interface Env extends CloudflareEnv {}
 }
 
 declare namespace App {

@@ -1,0 +1,1 @@
+ALTER TABLE `activities` ADD `featured_image_key` text;

@@ -3,6 +3,7 @@ import { getDb } from '../../../lib/db';
 import { activityCategories, activities } from '../../../db/schema';
 import { eq } from 'drizzle-orm';
 import { env } from 'cloudflare:workers';
+import { errorMessage, RequestValidationError, validatePositiveInteger, validateSlug } from '../../../lib/validation';
 
 // GET all activity categories
 export const GET: APIRoute = async () => {
@@ -30,16 +31,11 @@ export const POST: APIRoute = async ({ request, url }) => {
   try {
     const db = getDb(env.DB);
     const methodFromQuery = url.searchParams.get('_method');
-    const id = parseInt(url.searchParams.get('id') || '');
+    const rawId = url.searchParams.get('id');
 
     // Handle DELETE
     if (methodFromQuery === 'DELETE') {
-      if (!id || isNaN(id)) {
-        return new Response(JSON.stringify({ error: 'Missing category ID' }), {
-          status: 400,
-          headers: { 'Content-Type': 'application/json' },
-        });
-      }
+      const id = validatePositiveInteger(rawId, 'id');
 
       // Check if any activities use this category
       const linkedActivities = await db
@@ -64,15 +60,9 @@ export const POST: APIRoute = async ({ request, url }) => {
 
     // Handle CREATE
     const formData = await request.formData();
-    const slug = (formData.get('slug') as string)?.trim();
-    const sortOrder = parseInt(formData.get('sort_order') as string) || 0;
-
-    if (!slug) {
-      return new Response(JSON.stringify({ error: '分类标识不能为空' }), {
-        status: 400,
-        headers: { 'Content-Type': 'application/json' },
-      });
-    }
+    const slug = validateSlug(formData.get('slug'));
+    const sortOrder = Number(formData.get('sort_order') || 0);
+    if (!Number.isInteger(sortOrder)) throw new RequestValidationError('sort_order must be an integer');
 
     // Check for duplicate slug
     const existing = await db
@@ -102,8 +92,9 @@ export const POST: APIRoute = async ({ request, url }) => {
     });
   } catch (error) {
     console.error('Error managing category:', error);
-    return new Response(JSON.stringify({ error: 'Failed to manage category' }), {
-      status: 500,
+    const badRequest = error instanceof RequestValidationError;
+    return new Response(JSON.stringify({ error: badRequest ? errorMessage(error) : 'Failed to manage category' }), {
+      status: badRequest ? 400 : 500,
       headers: { 'Content-Type': 'application/json' },
     });
   }

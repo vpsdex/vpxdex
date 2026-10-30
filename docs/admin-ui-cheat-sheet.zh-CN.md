@@ -137,7 +137,7 @@
 </AdminFormPage>
 ```
 
-如果当前页面本身已经有 `main.container`，并且表单下方还有列表、分类管理等区块，可改用：
+如果当前页面本身已经有 `main.container`，并且表单下方还有列表或其他管理区块，可改用：
 
 ```astro
 <AdminFormPage title="区块标题" wrapMain={false}>

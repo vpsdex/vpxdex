@@ -4,6 +4,7 @@ import { getDb } from '../lib/db';
 import { providers, activities, activitiesContent } from '../db/schema';
 import { eq, and } from 'drizzle-orm';
 import { locales } from '../i18n/config';
+import { providerCategories } from '../lib/provider-categories';
 
 function escapeXml(str: string): string {
   return str.replace(/[<>&'"]/g, (c) => {
@@ -18,9 +19,9 @@ function escapeXml(str: string): string {
   });
 }
 
-export const GET: APIRoute = async ({ url }) => {
+export const GET: APIRoute = async ({ site }) => {
   const db = getDb(env.DB);
-  const baseUrl = url.origin;
+  const baseUrl = site!.href.replace(/\/$/, '');
   const urls: string[] = [];
 
   // --- 首页 ---
@@ -36,6 +37,22 @@ ${hreflangs}
   </url>`);
   }
 
+  // --- 服务商类目列表页 ---
+  for (const category of providerCategories) {
+    for (const locale of locales) {
+      const hreflangs = locales
+        .map((l) => `    <xhtml:link rel="alternate" hreflang="${l}" href="${baseUrl}/${l}/category/${category}/" />`)
+        .join('\n');
+      urls.push(`  <url>
+    <loc>${baseUrl}/${locale}/category/${category}/</loc>
+    <changefreq>weekly</changefreq>
+    <priority>0.8</priority>
+${hreflangs}
+    <xhtml:link rel="alternate" hreflang="x-default" href="${baseUrl}/zh/category/${category}/" />
+  </url>`);
+    }
+  }
+
   // --- 活动列表页 ---
   for (const locale of locales) {
     const hreflangs = locales
@@ -47,6 +64,23 @@ ${hreflangs}
     <priority>0.9</priority>
 ${hreflangs}
   </url>`);
+  }
+
+  // --- 信任与政策页面 ---
+  const staticPages = ['about', 'methodology', 'disclosure', 'contact', 'privacy', 'terms'];
+  for (const page of staticPages) {
+    for (const locale of locales) {
+      const hreflangs = locales
+        .map((l) => `    <xhtml:link rel="alternate" hreflang="${l}" href="${baseUrl}/${l}/${page}/" />`)
+        .join('\n');
+      urls.push(`  <url>
+    <loc>${baseUrl}/${locale}/${page}/</loc>
+    <changefreq>monthly</changefreq>
+    <priority>0.5</priority>
+${hreflangs}
+    <xhtml:link rel="alternate" hreflang="x-default" href="${baseUrl}/zh/${page}/" />
+  </url>`);
+    }
   }
 
   // --- 服务商详情页 ---

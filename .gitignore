@@ -25,3 +25,9 @@ pnpm-debug.log*
 
 # cloudflare wrangler
 .wrangler/
+
+# local secrets (template: .dev.vars.example)
+.dev.vars
+
+# claude code local settings
+.claude/settings.local.json

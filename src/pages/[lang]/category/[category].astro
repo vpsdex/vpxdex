@@ -1,0 +1,156 @@
+---
+import BaseLayout from '../../../layouts/BaseLayout.astro';
+import ProviderCard from '../../../components/ProviderCard.astro';
+import Pagination from '../../../components/Pagination.astro';
+import { providers, providersContent } from '../../../db/schema';
+import { isValidLocale, locales, type Locale } from '../../../i18n/config';
+import { t } from '../../../i18n/utils';
+import { getDb } from '../../../lib/db';
+import { isProviderCategory } from '../../../lib/provider-categories';
+import { and, count, desc, eq } from 'drizzle-orm';
+import { env } from 'cloudflare:workers';
+
+const lang = Astro.params.lang as string;
+const category = Astro.params.category as string;
+
+if (!isValidLocale(lang) || !isProviderCategory(category)) {
+  return new Response('Not Found', {
+    status: 404,
+    headers: { 'content-type': 'text/plain; charset=utf-8' },
+  });
+}
+
+const locale = lang as Locale;
+const categoryLabel = t(locale, `categories.${category}`);
+const db = getDb(env.DB);
+const pageSize = 12;
+const pageParam = Astro.url.searchParams.get('page');
+const currentPage = pageParam && /^\d+$/.test(pageParam) ? Number(pageParam) : 1;
+
+if (currentPage < 1 || (pageParam !== null && (currentPage === 1 || !/^\d+$/.test(pageParam)))) {
+  return Astro.redirect(`/${locale}/category/${category}/`, 301);
+}
+
+const whereClause = and(eq(providers.is_active, true), eq(providers.category, category));
+const [{ total }] = await db.select({ total: count() }).from(providers).where(whereClause);
+const totalPages = Math.max(1, Math.ceil(total / pageSize));
+
+if (currentPage > totalPages) {
+  return Astro.redirect(
+    `/${locale}/category/${category}/${totalPages > 1 ? `?page=${totalPages}` : ''}`,
+    302,
+  );
+}
+
+const rows = await db
+  .select()
+  .from(providers)
+  .leftJoin(
+    providersContent,
+    and(eq(providers.id, providersContent.provider_id), eq(providersContent.lang, locale)),
+  )
+  .where(whereClause)
+  .orderBy(desc(providers.id))
+  .limit(pageSize)
+  .offset((currentPage - 1) * pageSize);
+
+const siteUrl = Astro.site!.href.replace(/\/$/, '');
+const basePath = `/${locale}/category/${category}/`;
+const pageSuffix = currentPage > 1 ? `?page=${currentPage}` : '';
+const pageUrl = `${siteUrl}${basePath}${pageSuffix}`;
+const alternates = locales.map((targetLocale) => ({
+  lang: targetLocale,
+  href: `${siteUrl}/${targetLocale}/category/${category}/${pageSuffix}`,
+}));
+const title = locale === 'zh'
+  ? `${categoryLabel}服务商推荐与对比${currentPage > 1 ? ` - 第 ${currentPage} 页` : ''} | VPSDEX`
+  : `Best ${categoryLabel} Providers & Comparisons${currentPage > 1 ? ` - Page ${currentPage}` : ''} | VPSDEX`;
+const description = locale === 'zh'
+  ? `浏览 VPSDEX 收录的${categoryLabel}服务商，比较产品定位、评分、适用场景和重要风险信息。`
+  : `Browse ${categoryLabel} providers listed by VPSDEX and compare positioning, ratings, use cases and important risk notes.`;
+
+const collectionJsonLd = {
+  '@context': 'https://schema.org',
+  '@type': 'CollectionPage',
+  name: title,
+  description,
+  url: pageUrl,
+  inLanguage: locale,
+  mainEntity: {
+    '@type': 'ItemList',
+    numberOfItems: total,
+    itemListElement: rows.map((row, index) => {
+      const slug = locale === 'zh' ? row.providers.slug_zh : row.providers.slug_en;
+      return {
+        '@type': 'ListItem',
+        position: (currentPage - 1) * pageSize + index + 1,
+        url: `${siteUrl}/${locale}/provider/${slug}/`,
+        name: row.providers_content?.name || slug,
+      };
+    }),
+  },
+};
+
+const breadcrumbJsonLd = {
+  '@context': 'https://schema.org',
+  '@type': 'BreadcrumbList',
+  itemListElement: [
+    { '@type': 'ListItem', position: 1, name: t(locale, 'nav.home'), item: `${siteUrl}/${locale}/` },
+    { '@type': 'ListItem', position: 2, name: categoryLabel, item: pageUrl },
+  ],
+};
+---
+
+<BaseLayout
+  title={title}
+  description={description}
+  lang={locale}
+  alternates={alternates}
+  xDefault={`${siteUrl}/zh/category/${category}/${pageSuffix}`}
+  jsonLd={collectionJsonLd}
+  extraJsonLd={[breadcrumbJsonLd]}
+  canonical={pageUrl}
+  prev={currentPage > 1 ? `${siteUrl}${basePath}${currentPage > 2 ? `?page=${currentPage - 1}` : ''}` : undefined}
+  next={currentPage < totalPages ? `${siteUrl}${basePath}?page=${currentPage + 1}` : undefined}
+>
+  <section class="home-hero mb-8">
+    <nav class="text-sm text-gray-500 mb-4" aria-label={locale === 'zh' ? '面包屑' : 'Breadcrumb'}>
+      <a href={`/${locale}/`} class="hover:text-gray-900">{t(locale, 'nav.home')}</a>
+      <span aria-hidden="true"> / </span>
+      <span>{categoryLabel}</span>
+    </nav>
+    <p class="eyebrow">{locale === 'zh' ? '服务商类目' : 'Provider category'}</p>
+    <h1 class="hero-title">{categoryLabel}</h1>
+    <p class="hero-copy">{description}</p>
+  </section>
+
+  <div class="category-heading">
+    <h2 class="text-xl font-semibold text-gray-800">
+      {locale === 'zh' ? `全部${categoryLabel}服务商` : `All ${categoryLabel} providers`}
+    </h2>
+    <span class="category-count">{total} {locale === 'zh' ? '家服务商' : 'providers'}</span>
+  </div>
+
+  {rows.length > 0 ? (
+    <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+      {rows.map((row) => (
+        <ProviderCard
+          provider={row.providers}
+          content={row.providers_content || { name: row.providers.slug_en, desc: null }}
+          lang={locale}
+        />
+      ))}
+    </div>
+  ) : (
+    <div class="admin-empty-state rounded-xl border border-gray-200 bg-white">
+      {locale === 'zh' ? '该类目暂未收录服务商。' : 'No providers have been listed in this category yet.'}
+    </div>
+  )}
+
+  <Pagination
+    currentPage={currentPage}
+    totalPages={totalPages}
+    basePath={basePath}
+    lang={locale}
+  />
+</BaseLayout>

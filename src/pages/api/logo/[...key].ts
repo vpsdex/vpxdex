@@ -18,10 +18,12 @@ export const GET: APIRoute = async ({ params }) => {
     return new Response('Not found', { status: 404 });
   }
 
-  return new Response(object.body, {
-    headers: {
+    const headers = new Headers({
       'Content-Type': object.httpMetadata?.contentType || 'image/png',
-      'Cache-Control': 'public, max-age=604800',
-    },
-  });
+      'Cache-Control': 'public, max-age=31536000, immutable',
+    });
+    // 图片资源不需要执行任何脚本;禁止 SVG 内嵌脚本在直接访问时执行(存储型 XSS 防护)
+    headers.set('Content-Security-Policy', "default-src 'none'");
+
+    return new Response(object.body, { headers });
 };

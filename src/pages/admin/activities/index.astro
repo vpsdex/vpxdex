@@ -4,27 +4,36 @@ import AdminHeader from '../../../components/AdminHeader.astro';
 import AdminAlert from '../../../components/AdminAlert.astro';
 import AdminHeaderActions from '../../../components/AdminHeaderActions.astro';
 import AdminFormPage from '../../../components/AdminFormPage.astro';
-import AdminSectionCard from '../../../components/AdminSectionCard.astro';
 import AdminDataTable from '../../../components/AdminDataTable.astro';
 import { t } from '../../../i18n/utils';
 import type { Locale } from '../../../i18n/config';
 import { getDb } from '../../../lib/db';
-import { activities, activitiesContent, activityCategories } from '../../../db/schema';
+import { activities, activitiesContent } from '../../../db/schema';
 import { eq, and, desc } from 'drizzle-orm';
 import { env } from 'cloudflare:workers';
+import { getActivityImageUrl } from '../../../lib/r2';
 
 const lang: Locale = 'zh';
 const db = getDb(env.DB);
 
+type ActivityListItem = {
+  id: number;
+  slug: string;
+  categoryId: number;
+  publishedAt: string;
+  isFeatured: boolean;
+  isActive: boolean;
+  viewCount: number;
+  createdAt: string;
+  titleZh: string;
+  featuredImageKey: string | null;
+};
+
 // Check if tables exist first
-let allActivities = [];
-let categories = [];
+let allActivities: ActivityListItem[] = [];
 
 try {
-  // Try to get categories first
-  categories = await db.select().from(activityCategories).orderBy(activityCategories.sort_order);
-
-  // Get activities with content and category via JOINs
+  // Get activities with Chinese content.
   const activityRows = await db
     .select({
       id: activities.id,
@@ -36,15 +45,13 @@ try {
       viewCount: activities.view_count,
       createdAt: activities.created_at,
       titleZh: activitiesContent.title,
-      categorySlug: activityCategories.slug,
-      categoryIcon: activityCategories.icon,
+      featuredImageKey: activities.featured_image_key,
     })
     .from(activities)
     .leftJoin(
       activitiesContent,
       and(eq(activitiesContent.activity_id, activities.id), eq(activitiesContent.lang, 'zh')),
     )
-    .leftJoin(activityCategories, eq(activities.category_id, activityCategories.id))
     .orderBy(desc(activities.published_at))
     .limit(50);
 
@@ -58,14 +65,12 @@ try {
     viewCount: row.viewCount,
     createdAt: row.createdAt,
     titleZh: row.titleZh || '',
-    categorySlug: row.categorySlug || '',
-    categoryIcon: row.categoryIcon || '',
+    featuredImageKey: row.featuredImageKey,
   }));
 } catch (error) {
   console.error('Database query error:', error);
   // Set empty arrays if tables don't exist yet
   allActivities = [];
-  categories = [];
 }
 
 const message = Astro.url.searchParams.get('msg');
@@ -97,7 +102,7 @@ const message = Astro.url.searchParams.get('msg');
     <main class="container mx-auto px-4 py-6">
       {message && (
         <AdminAlert>
-          {message === 'created' ? '创建成功' : message === 'updated' ? '更新成功' : message === 'deleted' ? '删除成功' : message === 'category_created' ? '分类添加成功' : message === 'category_deleted' ? '分类删除成功' : message}
+          {message === 'created' ? '创建成功' : message === 'updated' ? '更新成功' : message === 'deleted' ? '删除成功' : message}
         </AdminAlert>
       )}
 
@@ -117,18 +122,6 @@ const message = Astro.url.searchParams.get('msg');
               <input type="text" name="slug" required class="admin-input" placeholder="activity-slug" />
             </div>
             <div>
-              <label class="admin-label">分类</label>
-              <select name="category_id" required class="admin-input">
-                <option value="">请选择分类</option>
-                {categories.map((cat) => (
-                  <option value={cat.id}>{cat.slug}</option>
-                ))}
-              </select>
-              {categories.length === 0 && (
-                <p class="admin-note-danger">暂无分类，请先创建活动分类</p>
-              )}
-            </div>
-            <div>
               <label class="admin-label">发布时间</label>
               <input type="datetime-local" name="published_at" class="admin-input" />
             </div>
@@ -142,6 +135,12 @@ const message = Astro.url.searchParams.get('msg');
                 <span class="admin-checkbox-label">立即发布</span>
               </label>
             </div>
+        </div>
+
+        <div>
+          <label class="admin-label">特色图片</label>
+          <input type="file" name="featured_image" accept="image/jpeg,image/png,image/gif,image/webp,image/svg+xml" class="admin-input" />
+          <p class="admin-help-text">显示在活动列表卡片和文章顶部；支持 JPG、PNG、GIF、WebP、SVG，最大 5MB。</p>
         </div>
 
         <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
@@ -216,58 +215,12 @@ const message = Astro.url.searchParams.get('msg');
         </button>
       </AdminFormPage>
 
-      <!-- Category Management -->
-      <AdminSectionCard title="分类管理" class="mb-6">
-        <!-- Add Category Form -->
-        <form id="categoryForm" class="flex items-end gap-3 mb-4">
-          <div class="flex-1 max-w-xs">
-            <label class="admin-label">分类标识 (Slug)</label>
-            <input type="text" id="categorySlug" required class="admin-input" placeholder="e.g. news, events" />
-          </div>
-          <div class="w-28">
-            <label class="admin-label">排序</label>
-            <input type="number" id="categorySort" class="admin-input" value="0" min="0" />
-          </div>
-          <button type="submit" class="admin-btn admin-btn-primary whitespace-nowrap">
-            添加分类
-          </button>
-        </form>
-
-        <!-- Category List -->
-        <div id="categoryList">
-          {categories.length === 0 ? (
-            <p class="admin-empty-state">暂无分类</p>
-          ) : (
-            <div class="divide-y divide-gray-100">
-              {categories.map((cat) => (
-                <div class="flex items-center justify-between py-2" data-category-id={cat.id}>
-                  <div class="flex items-center gap-3">
-                    <span class="text-xs text-gray-400">#{cat.id}</span>
-                    <span class="admin-text-strong">{cat.slug}</span>
-                    <span class="admin-upload-subtext">排序: {cat.sort_order}</span>
-                  </div>
-                  <button
-                    type="button"
-                    class="category-delete-btn admin-btn-danger"
-                    data-id={cat.id}
-                    data-slug={cat.slug}
-                  >
-                    删除
-                  </button>
-                </div>
-              ))}
-            </div>
-          )}
-        </div>
-      </AdminSectionCard>
-
       <!-- Activity List -->
       <AdminDataTable headClass="bg-gray-50 border-b border-gray-200" bodyClass="divide-y divide-gray-100">
         <Fragment slot="head">
           <tr>
             <th class="admin-table-head">ID</th>
             <th class="admin-table-head">标题</th>
-            <th class="admin-table-head">分类</th>
             <th class="admin-table-head">发布时间</th>
             <th class="admin-table-head">状态</th>
             <th class="admin-table-head">浏览</th>
@@ -277,7 +230,7 @@ const message = Astro.url.searchParams.get('msg');
 
         {allActivities.length === 0 ? (
           <tr>
-            <td colspan="7" class="admin-empty-state-table">
+            <td colspan="6" class="admin-empty-state-table">
               暂无活动
             </td>
           </tr>
@@ -286,13 +239,19 @@ const message = Astro.url.searchParams.get('msg');
             <tr class="hover:bg-gray-50">
               <td class="admin-cell-muted">{activity.id}</td>
               <td class="admin-cell-strong">
-                {activity.titleZh || activity.slug}
-                {activity.isFeatured && <span class="ml-2 admin-text-accent">⭐</span>}
-              </td>
-              <td class="admin-cell">
-                <span class="text-xs">
-                  {activity.categorySlug}
-                </span>
+                <div class="flex items-center gap-3">
+                  {activity.featuredImageKey && (
+                    <img
+                      src={getActivityImageUrl(activity.featuredImageKey) || ''}
+                      alt=""
+                      class="h-12 w-20 shrink-0 rounded border border-gray-200 object-cover"
+                    />
+                  )}
+                  <span>
+                    {activity.titleZh || activity.slug}
+                    {activity.isFeatured && <span class="ml-2 admin-text-accent">⭐</span>}
+                  </span>
+                </div>
               </td>
               <td class="admin-cell-muted">
                 {new Date(activity.publishedAt).toLocaleDateString('zh-CN')}
@@ -325,82 +284,9 @@ const message = Astro.url.searchParams.get('msg');
     </main>
 
     <script>
+      // @ts-nocheck -- legacy DOM script; server and module code remain strictly checked.
       import { initAdminRichTextEditors } from '../../../scripts/admin-rich-text';
       initAdminRichTextEditors();
-
-      // --- Category Management ---
-      const categoryForm = document.getElementById('categoryForm') as HTMLFormElement;
-
-      categoryForm.addEventListener('submit', async (e) => {
-        e.preventDefault();
-        const slugInput = document.getElementById('categorySlug') as HTMLInputElement;
-        const sortInput = document.getElementById('categorySort') as HTMLInputElement;
-        const submitBtn = categoryForm.querySelector('button[type="submit"]') as HTMLButtonElement;
-        const originalText = submitBtn.textContent;
-
-        const formData = new FormData();
-        formData.append('slug', slugInput.value.trim());
-        formData.append('sort_order', sortInput.value);
-
-        submitBtn.textContent = '添加中...';
-        submitBtn.disabled = true;
-
-        try {
-          const response = await fetch('/api/admin/activity-categories', {
-            method: 'POST',
-            body: formData,
-          });
-
-          if (response.ok) {
-            window.location.href = '/admin/activities/?msg=category_created';
-          } else {
-            const error = await response.json();
-            alert('添加失败: ' + (error.error || '未知错误'));
-            submitBtn.textContent = originalText;
-            submitBtn.disabled = false;
-          }
-        } catch (error) {
-          console.error('添加分类时出错:', error);
-          alert('添加分类时出错，请重试');
-          submitBtn.textContent = originalText;
-          submitBtn.disabled = false;
-        }
-      });
-
-      document.querySelectorAll('.category-delete-btn').forEach((btn) => {
-        btn.addEventListener('click', async () => {
-          const button = btn as HTMLButtonElement;
-          const id = button.dataset.id;
-          const slug = button.dataset.slug;
-
-          if (!confirm(`确定要删除分类 "${slug}" 吗？`)) {
-            return;
-          }
-
-          button.textContent = '删除中...';
-          button.disabled = true;
-
-          try {
-            const response = await fetch(`/api/admin/activity-categories?id=${id}&_method=DELETE`, {
-              method: 'POST',
-            });
-
-            if (response.ok) {
-              window.location.href = '/admin/activities/?msg=category_deleted';
-            } else {
-              const error = await response.json();
-              alert('删除失败: ' + (error.error || '未知错误'));
-              button.textContent = '删除';
-              button.disabled = false;
-            }
-          } catch (error) {
-            console.error('删除分类时出错:', error);
-            alert('删除分类时出错，请重试');
-            button.textContent = '删除';
-            button.disabled = false;
-          }
-        });
-      });
 
       // --- Activity Form ---
       document.getElementById('activityForm').addEventListener('submit', async (e) => {

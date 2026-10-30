@@ -1,28 +1,30 @@
 ---
 name: "vpsdir-content-manager"
-description: "Manage VPS Directory website content (providers, activities, categories, images) via REST API. Use when publishing, editing, or deleting any content on vpsdir.com."
+description: "Manage VPSDEX providers, activities, internal categories, and images via REST API."
 version: "1.0.0"
-base_url: "https://vpsdir.com"
+base_url: "https://vpsdex.com"
 auth_type: "Bearer Token"
 ---
 
 # VPS Directory 内容管理技能
 
-本技能用于通过 REST API 管理 vpsdir.com 网站的全部内容，包括服务商、活动、分类和图片。
+本技能用于通过 REST API 管理 vpsdex.com 的服务商、活动、内部兼容分类和图片。活动分类不再显示于公开页面和后台界面，但 v1 API 仍保留 `category_id` 以兼容现有数据结构。
 
 ## 认证
 
 所有 API 请求必须在 Header 中携带 Bearer Token：
 
 ```
-Authorization: Bearer vpsdir_9a0248b8f2372320f27a58cf8639ee768529f9e135d9db1021133f4827a0ec2e
+Authorization: Bearer <YOUR_API_BEARER_TOKEN>
 ```
 
 未携带或携带错误 Token 的请求将返回 `401 Unauthorized`。
 
+> **注意**:真实 Token 通过 `wrangler secret put API_BEARER_TOKEN` 设置(本地开发写在 `.dev.vars` 中)。请勿将真实 Token 写入任何文档、代码或提交到仓库。
+
 ## 基础信息
 
-- **Base URL**: `https://vpsdir.com`（生产环境）
+- **Base URL**: `https://vpsdex.com`（生产环境）
 - **本地开发**: `http://localhost:4321`
 - **数据格式**: JSON（除图片上传使用 multipart/form-data）
 - **字符编码**: UTF-8
@@ -145,6 +147,7 @@ GET /api/v1/activities
     {
       "id": 1,
       "slug": "summer-sale-2024",
+      "featured_image_key": "activity-images/1717200000000-a1b2c3d4.jpg",
       "category_id": 2,
       "category_slug": "promotions",
       "published_at": "2024-06-01T00:00:00.000Z",
@@ -165,7 +168,7 @@ GET /api/v1/activities
 GET /api/v1/activities/{id}
 ```
 
-**响应包含**：活动基础信息 + 所有语言内容（title、slug、description、content、meta 信息）+ 所属分类信息。
+**响应包含**：活动基础信息、`featured_image_key`、内部分类兼容信息，以及所有语言内容（title、slug、description、content、meta 信息）。
 
 ### 2.3 创建活动
 
@@ -178,6 +181,7 @@ Content-Type: application/json
 ```json
 {
   "slug": "summer-sale-2024",
+  "featured_image_key": "activity-images/1717200000000-a1b2c3d4.jpg",
   "category_id": 2,
   "published_at": "2024-06-01T00:00:00Z",
   "is_featured": true,
@@ -207,13 +211,15 @@ Content-Type: application/json
 
 > **注意**: `category_id` 必须是已存在的分类 ID。可通过 `GET /api/v1/categories` 查询。
 
+`featured_image_key` 可选，必须使用 `activity-images/` 前缀。特色图片固定显示在公开活动卡片内容上方，同时用于文章头图、Open Graph、Twitter Card 和 Article JSON-LD。
+
 ### 2.4 更新活动
 
 ```
 PUT /api/v1/activities/{id}
 ```
 
-所有字段可选。更新 `contents` 时按 `lang` 自动新增或更新。
+所有字段可选。更新 `contents` 时按 `lang` 自动新增或更新。将 `featured_image_key` 设置为新的 `activity-images/` 键可更换特色图，设置为 `null` 可移除特色图；更换或移除后会清理旧 R2 对象。
 
 ### 2.5 删除活动
 
@@ -221,11 +227,13 @@ PUT /api/v1/activities/{id}
 DELETE /api/v1/activities/{id}
 ```
 
-删除活动及其所有多语言内容。
+删除活动及其所有多语言内容，同时清理关联的特色图片。
 
 ---
 
-## 三、分类管理
+## 三、内部分类兼容 API
+
+> 分类仅为兼容 `activities.category_id` 非空关系而保留，不再用于公开筛选、卡片标签或后台表单。除非维护旧 API 数据，不应新建或调整分类。
 
 ### 3.1 获取所有分类
 
@@ -300,7 +308,7 @@ Content-Type: multipart/form-data
 | 字段 | 必填 | 说明 |
 |------|------|------|
 | `image` | 是 | 图片文件（支持 jpg/png/gif/webp/svg，最大 5MB） |
-| `type` | 否 | 图片类型：`logo`（服务商 Logo）或 `editor`（富文本插图），默认 `editor` |
+| `type` | 否 | 图片类型：`logo`（服务商 Logo）、`activity`（活动特色图）或 `editor`（富文本插图），默认 `editor` |
 
 #### type=editor（富文本插图）
 
@@ -331,31 +339,47 @@ Content-Type: multipart/form-data
 
 > 将返回的 `logo_key` 设置到服务商的 `logo_key` 字段即可正常显示 Logo。
 
+#### type=activity（活动特色图）
+
+上传后图片存储到 `activity-images/` 目录，通过 `/api/image/` 端点访问。
+
+**响应**:
+```json
+{
+  "featured_image_key": "activity-images/1717200000000-a1b2c3d4.jpg",
+  "url": "/api/image/activity-images/1717200000000-a1b2c3d4.jpg",
+  "filename": "activity-images/1717200000000-a1b2c3d4.jpg"
+}
+```
+
+将 `featured_image_key` 写入活动即可在卡片上方显示特色图片。
+
 ---
 
 ## 五、典型工作流示例
 
 ### 5.1 发布一篇带图活动
 
-1. **上传图片**:
+1. **上传特色图片**:
    ```
    POST /api/v1/upload
    Content-Type: multipart/form-data
-   image=@photo.jpg, type=editor
+   image=@cover.jpg, type=activity
 
-   → { "url": "/api/image/editor-images/xxx.jpg", "filename": "editor-images/xxx.jpg" }
+   → { "featured_image_key": "activity-images/xxx.jpg", "url": "/api/image/activity-images/xxx.jpg" }
    ```
 
-2. **创建活动**（在 content 中引用图片 URL）:
+2. **创建活动并关联特色图片**:
    ```
    POST /api/v1/activities
    {
      "slug": "new-promo",
      "category_id": 1,
+     "featured_image_key": "activity-images/xxx.jpg",
      "contents": [{
        "lang": "zh",
        "title": "新促销活动",
-       "content": "<p><img src=\"/api/image/editor-images/xxx.jpg\" />活动详情</p>"
+       "content": "<p>活动详情</p>"
      }]
    }
    ```

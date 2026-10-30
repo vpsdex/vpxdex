@@ -1,0 +1,212 @@
+---
+import BaseLayout from '../../layouts/BaseLayout.astro';
+import { isValidLocale, locales, type Locale } from '../../i18n/config';
+
+const lang = Astro.params.lang as string;
+const page = Astro.params.page as string;
+if (!isValidLocale(lang)) {
+  return new Response('Not Found', { status: 404, headers: { 'content-type': 'text/plain; charset=utf-8' } });
+}
+
+type Section = { heading: string; paragraphs?: string[]; items?: string[] };
+type PageContent = { title: string; description: string; intro: string; sections: Section[] };
+
+const pages: Record<string, Record<Locale, PageContent>> = {
+  about: {
+    zh: {
+      title: '关于 VPSDEX',
+      description: '了解 VPSDEX 的目录定位、编辑原则、覆盖范围和信息核验方式。',
+      intro: 'VPSDEX 是一个独立的云服务目录，帮助读者比较 VPS、域名、托管、企业邮箱与 CDN 服务。',
+      sections: [
+        { heading: '我们做什么', paragraphs: ['我们整理服务商公开资料、产品定位、适用场景和重要限制，并以中英文目录与专题文章呈现。目录的目标是缩短初步筛选时间，而不是替代购买前的独立测试。'] },
+        { heading: '编辑原则', items: ['优先引用服务商官网、公开条款和可复核资料。', '对价格、库存、优惠和退款政策标注时效风险。', '不因广告、联盟佣金或服务商关系改变事实判断。', '发现停运、冒名或重大争议时优先提示风险。'] },
+        { heading: '内容边界', paragraphs: ['网络质量、IP信誉、路由和库存会随地区与时间变化。VPSDEX 的评分和说明是编辑性参考，不构成性能保证、投资建议或购买承诺。'] },
+      ],
+    },
+    en: {
+      title: 'About VPSDEX',
+      description: 'Learn about the VPSDEX directory, editorial principles, coverage and verification process.',
+      intro: 'VPSDEX is an independent cloud-service directory for comparing VPS, domain, hosting, business email and CDN providers.',
+      sections: [
+        { heading: 'What we do', paragraphs: ['We organize public provider information, product positioning, use cases and material limitations into bilingual directory pages and editorial articles. The directory shortens initial research; it does not replace pre-purchase testing.'] },
+        { heading: 'Editorial principles', items: ['Prefer official provider pages, public terms and verifiable sources.', 'Treat prices, inventory, promotions and refund policies as time-sensitive.', 'Do not change factual conclusions because of advertising, affiliate commissions or provider relationships.', 'Prioritize warnings when a service closes, is impersonated or develops a material controversy.'] },
+        { heading: 'Limits', paragraphs: ['Network quality, IP reputation, routing and inventory vary by location and time. VPSDEX ratings and descriptions are editorial references, not performance guarantees or purchase commitments.'] },
+      ],
+    },
+  },
+  methodology: {
+    zh: {
+      title: 'VPSDEX 评测与评分方法',
+      description: 'VPSDEX 如何收录服务商、核验资料、形成评分并更新评测。',
+      intro: '本页说明目录收录、编辑评测和评分的统一方法，帮助读者理解结论从何而来。',
+      sections: [
+        { heading: '收录标准', items: ['存在可识别的官方网站或公开产品入口。', '服务范围与 VPS、域名、托管、企业邮箱或 CDN 相关。', '基础身份、产品、价格或条款信息可以被复核。', '停放域名、纯转售占位页和无法验证的品牌不作为正常服务商推荐。'] },
+        { heading: '核验层级', items: ['第一层：官网产品页、服务条款、状态页和公司公开信息。', '第二层：可重复的产品体验、路由、节点、支付和售后观察。', '第三层：公开社区反馈，用于发现问题线索，不把单一匿名评价当作定论。'] },
+        { heading: '评分说明', paragraphs: ['目录中的五分制为编辑性综合指标，参考产品透明度、可用信息、服务覆盖、价格竞争力、网络与售后风险。它不是用户评论平均分，也不代表所有地区和套餐都能获得相同体验。'] },
+        { heading: '更新与纠错', paragraphs: ['页面会在产品、价格、条款或运营状态发生重要变化时更新。读者和服务商可通过联系页提交可验证的更正资料；编辑会保留独立判断。'] },
+      ],
+    },
+    en: {
+      title: 'VPSDEX Review Methodology',
+      description: 'How VPSDEX lists providers, verifies information, assigns ratings and updates reviews.',
+      intro: 'This page explains the common process behind directory listings, editorial reviews and ratings.',
+      sections: [
+        { heading: 'Listing criteria', items: ['An identifiable official website or public product entry exists.', 'The service relates to VPS, domains, hosting, business email or CDN.', 'Basic identity, product, pricing or terms can be verified.', 'Parked domains, placeholder resellers and unverifiable brands are not treated as normal recommendations.'] },
+        { heading: 'Evidence hierarchy', items: ['Primary: official product pages, terms, status pages and public company information.', 'Secondary: repeatable product, routing, location, payment and support observations.', 'Tertiary: public community feedback as a lead, never a final conclusion based on one anonymous report.'] },
+        { heading: 'What the rating means', paragraphs: ['The five-point directory rating is an editorial composite considering product transparency, available evidence, coverage, value, network risk and support risk. It is not an average of user reviews and does not promise identical results across plans or regions.'] },
+        { heading: 'Updates and corrections', paragraphs: ['Pages are updated when material product, pricing, policy or operating-status changes are identified. Readers and providers may submit verifiable corrections through the contact page; editorial judgment remains independent.'] },
+      ],
+    },
+  },
+  disclosure: {
+    zh: {
+      title: '商业合作与联盟披露',
+      description: 'VPSDEX 关于广告、联盟链接、赞助内容和编辑独立性的说明。',
+      intro: 'VPSDEX 的部分外部链接可能属于联盟或合作链接，但这不会增加读者的购买价格。',
+      sections: [
+        { heading: '编辑独立性', paragraphs: ['是否存在佣金不会决定服务商能否被收录、评分高低或评测结论。我们不会承诺正面评价，也不会隐藏已知的重要限制。'] },
+        { heading: '赞助与广告', paragraphs: ['若内容由服务商赞助、提供样机或存在其他重大关系，应在相关页面明确标注。普通目录收录不等于服务商认可或官方合作。'] },
+        { heading: '关系标识', paragraphs: ['当某个链接或页面存在可确认的佣金、赞助或评测资源关系时，VPSDEX 会在相关内容附近说明。若未标注，并不代表对外部服务作出保证；读者可通过联系页提交遗漏线索。'] },
+        { heading: '利益冲突处理', paragraphs: ['合作方不能预先审定评分或删除基于证据的重要缺点。若商业关系可能影响读者判断，编辑应补充来源、限制和核验日期，必要时暂缓推荐。'] },
+        { heading: '购买责任', paragraphs: ['外部网站的价格、条款、隐私和售后由对应服务商负责。付款前请自行核对最终账单、续费价、退款政策和适用地区。'] },
+      ],
+    },
+    en: {
+      title: 'Commercial and Affiliate Disclosure',
+      description: 'VPSDEX disclosure covering advertising, affiliate links, sponsorship and editorial independence.',
+      intro: 'Some outbound links on VPSDEX may be affiliate or commercial links, without increasing the price paid by the reader.',
+      sections: [
+        { heading: 'Editorial independence', paragraphs: ['Commission does not determine whether a provider is listed, its rating or an editorial conclusion. We do not promise positive coverage or conceal known material limitations.'] },
+        { heading: 'Sponsorship and advertising', paragraphs: ['Provider sponsorship, review access or another material relationship should be disclosed on the relevant page. An ordinary directory listing does not imply provider endorsement or an official partnership.'] },
+        { heading: 'Purchase responsibility', paragraphs: ['External providers control their pricing, terms, privacy and support. Verify the final invoice, renewal price, refund policy and regional eligibility before payment.'] },
+      ],
+    },
+  },
+  contact: {
+    zh: {
+      title: '联系与纠错',
+      description: '向 VPSDEX 提交资料纠错、安全问题或服务商状态更新。',
+      intro: '如需纠正目录资料、报告失效链接或说明重大运营变化，请通过公开问题跟踪器提交可核验证据。',
+      sections: [
+        { heading: '提交入口', paragraphs: ['请访问 github.com/VirtualCardx/vpsdir/issues 创建问题。提交时请附上页面 URL、需要修正的字段、官方证据链接和证据日期。'] },
+        { heading: '适合报告的内容', items: ['服务商官网、价格或条款变化。', '停运、冒名网站、安全风险或失效链接。', '名称、节点、支付、退款或产品描述错误。', '隐私、版权或其他合规请求。'] },
+        { heading: '处理原则', paragraphs: ['我们会优先处理可能导致读者损失的安全与停运信息。提交资料不保证按请求原样修改，最终内容以可验证证据和编辑判断为准。'] },
+      ],
+    },
+    en: {
+      title: 'Contact and Corrections',
+      description: 'Submit corrections, security issues or provider-status updates to VPSDEX.',
+      intro: 'To correct directory information, report a broken link or document a material operating change, submit verifiable evidence through the public issue tracker.',
+      sections: [
+        { heading: 'Submission channel', paragraphs: ['Open an issue at github.com/VirtualCardx/vpsdir/issues. Include the affected page URL, the field to correct, an official evidence link and the date of that evidence.'] },
+        { heading: 'What to report', items: ['Provider website, pricing or policy changes.', 'Closure, impersonation, security risks or broken links.', 'Incorrect names, locations, payments, refunds or product descriptions.', 'Privacy, copyright or other compliance requests.'] },
+        { heading: 'How requests are handled', paragraphs: ['Safety and closure reports that could prevent reader harm receive priority. A submission does not guarantee the requested wording; final changes depend on verifiable evidence and editorial judgment.'] },
+      ],
+    },
+  },
+  privacy: {
+    zh: {
+      title: '隐私政策',
+      description: 'VPSDEX 关于访问日志、分析数据、Cookie、外部链接和隐私请求的政策。',
+      intro: 'VPSDEX 尽量减少个人数据收集，并仅将必要数据用于安全、运维和站点改进。',
+      sections: [
+        { heading: '可能处理的数据', items: ['服务器与安全日志中的 IP、浏览器、时间和请求路径。', 'Cloudflare 提供的聚合性能、流量与安全数据。', '用户主动提交纠错时提供的信息。'] },
+        { heading: '使用目的', paragraphs: ['这些数据用于防滥用、排查故障、了解页面性能和改进内容。VPSDEX 不出售个人信息，也不建立用于跨站广告追踪的用户档案。'] },
+        { heading: '外部网站', paragraphs: ['点击服务商链接后将适用该服务商自己的隐私政策。VPSDEX 无法控制外部网站的 Cookie、支付或数据处理。'] },
+        { heading: '隐私请求', paragraphs: ['请通过联系页提交访问、更正或删除请求，并提供足够信息以定位相关记录。法律或安全要求可能限制部分删除。'] },
+      ],
+    },
+    en: {
+      title: 'Privacy Policy',
+      description: 'VPSDEX policy for access logs, analytics, cookies, external links and privacy requests.',
+      intro: 'VPSDEX minimizes personal-data collection and uses necessary data only for security, operations and site improvement.',
+      sections: [
+        { heading: 'Data that may be processed', items: ['IP address, browser, timestamp and request path in server and security logs.', 'Aggregate performance, traffic and security data provided by Cloudflare.', 'Information voluntarily supplied with a correction request.'] },
+        { heading: 'Purpose', paragraphs: ['Data is used to prevent abuse, diagnose faults, understand page performance and improve content. VPSDEX does not sell personal information or build cross-site advertising profiles.'] },
+        { heading: 'External sites', paragraphs: ['A provider’s own privacy policy applies after you follow an external link. VPSDEX does not control third-party cookies, payments or data processing.'] },
+        { heading: 'Privacy requests', paragraphs: ['Use the contact page to request access, correction or deletion, with enough information to locate the relevant record. Legal or security obligations may limit deletion.'] },
+      ],
+    },
+  },
+  terms: {
+    zh: {
+      title: '使用条款',
+      description: '使用 VPSDEX 目录、评分、文章和外部链接时适用的基本条款。',
+      intro: '访问和使用 VPSDEX 即表示您理解本站提供的是一般信息与比较工具。',
+      sections: [
+        { heading: '不构成保证', paragraphs: ['页面信息可能因服务商调整而过时。评分、排序和评测不构成性能、可用性、收益或适用性的保证。'] },
+        { heading: '外部交易', paragraphs: ['购买、付款、退款和支持关系发生在您与服务商之间。VPSDEX 不是相关合同的一方，不代为处理账户或付款纠纷。'] },
+        { heading: '合理使用', paragraphs: ['不得利用本站实施攻击、自动化滥用、绕过访问控制或侵犯他人权利。引用内容时应注明来源，不得冒充 VPSDEX 或服务商官方。'] },
+        { heading: '内容与链接', paragraphs: ['目录名称、标识和外部链接仅用于识别与比较。未经许可不得批量复制本站原创评测、绕过技术限制抓取数据，或将页面内容包装成服务商的官方声明。'] },
+        { heading: '责任限制', paragraphs: ['在法律允许范围内，用户应对购买前核验和数据备份负责。因依赖过时信息、第三方服务或外部网站导致的损失不由 VPSDEX 承担。'] },
+        { heading: '条款更新', paragraphs: ['当站点功能、数据处理方式或适用规则发生重大变化时，本页可能更新。继续使用本站前请查看页面标注的更新日期；不同意更新内容时应停止使用相关功能。'] },
+      ],
+    },
+    en: {
+      title: 'Terms of Use',
+      description: 'Basic terms governing use of the VPSDEX directory, ratings, articles and external links.',
+      intro: 'By using VPSDEX you understand that the site provides general information and comparison tools.',
+      sections: [
+        { heading: 'No warranty', paragraphs: ['Information may become outdated when providers change their products. Ratings, rankings and reviews do not guarantee performance, availability, returns or suitability.'] },
+        { heading: 'External transactions', paragraphs: ['Purchases, payments, refunds and support are between you and the provider. VPSDEX is not a party to those contracts and cannot resolve account or payment disputes.'] },
+        { heading: 'Acceptable use', paragraphs: ['Do not attack the site, automate abuse, bypass access controls or infringe rights. Attribute quoted material and do not impersonate VPSDEX or an official provider.'] },
+        { heading: 'Limitation of liability', paragraphs: ['To the extent permitted by law, users are responsible for pre-purchase verification and backups. VPSDEX is not liable for losses caused by outdated information, third-party services or external sites.'] },
+      ],
+    },
+  },
+};
+
+const content = pages[page]?.[lang as Locale];
+if (!content) {
+  return new Response('Not Found', { status: 404, headers: { 'content-type': 'text/plain; charset=utf-8' } });
+}
+const siteUrl = Astro.site!.href.replace(/\/$/, '');
+const alternates = locales.map((locale) => ({ lang: locale, href: `${siteUrl}/${locale}/${page}/` }));
+const jsonLd = {
+  '@context': 'https://schema.org',
+  '@type': page === 'about' ? 'AboutPage' : 'WebPage',
+  name: content.title,
+  description: content.description,
+  url: `${siteUrl}/${lang}/${page}/`,
+  inLanguage: lang,
+  dateModified: '2026-08-24',
+  publisher: { '@type': 'Organization', name: 'VPSDEX', url: `${siteUrl}/${lang}/` },
+};
+---
+
+<BaseLayout
+  title={`${content.title} | VPSDEX`}
+  description={content.description}
+  lang={lang as Locale}
+  alternates={alternates}
+  xDefault={`${siteUrl}/zh/${page}/`}
+  jsonLd={jsonLd}
+>
+  <article class="max-w-4xl mx-auto">
+    <header class="mb-8">
+      <p class="eyebrow">VPSDEX</p>
+      <h1 class="text-3xl sm:text-4xl font-bold tracking-tight text-gray-900 mt-2">{content.title}</h1>
+      <p class="text-gray-600 leading-7 mt-4 max-w-3xl">{content.intro}</p>
+      <p class="text-xs text-gray-600 mt-3">{lang === 'zh' ? '最后更新：2026年8月24日' : 'Last updated: August 24, 2026'}</p>
+    </header>
+
+    <div class="space-y-6">
+      {content.sections.map((section) => (
+        <section class="bg-white rounded-xl border border-gray-200 p-6 sm:p-8 shadow-sm">
+          <h2 class="text-xl font-semibold text-gray-900 mb-3">{section.heading}</h2>
+          {section.paragraphs?.map((paragraph) => <p class="text-gray-600 leading-7 mb-3 last:mb-0">{paragraph}</p>)}
+          {section.items && (
+            <ul class="list-disc pl-5 space-y-2 text-gray-600 leading-7">
+              {section.items.map((item) => <li>{item}</li>)}
+            </ul>
+          )}
+          {page === 'contact' && section.heading === (lang === 'zh' ? '提交入口' : 'Submission channel') && (
+            <a class="inline-flex mt-4 text-blue-600 font-medium hover:text-gray-900" href="https://github.com/VirtualCardx/vpsdir/issues" target="_blank" rel="noopener noreferrer">
+              github.com/VirtualCardx/vpsdir/issues →
+            </a>
+          )}
+        </section>
+      ))}
+    </div>
+  </article>
+</BaseLayout>

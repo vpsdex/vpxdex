@@ -3,6 +3,7 @@ import type { Locale } from '../i18n/config';
 import { t } from '../i18n/utils';
 import { getLogoUrl } from '../lib/r2';
 import { richTextToPlainText } from '../lib/rich-text';
+import { parseStoredTags } from '../lib/validation';
 
 interface Props {
   provider: {
@@ -27,7 +28,7 @@ const logoUrl = getLogoUrl(provider.logo_key, provider.updated_at);
 const descText = richTextToPlainText(content.desc);
 
 // Parse tags JSON (supports both old flat array and new bilingual format)
-const rawTags = provider.tags ? JSON.parse(provider.tags) : [];
+const rawTags = parseStoredTags(provider.tags);
 const tags = rawTags.map(tag => {
   if (typeof tag === 'string') return tag;
   return tag[lang] || tag.zh || tag.en || '';
@@ -35,7 +36,7 @@ const tags = rawTags.map(tag => {
 ---
 
 <a
-  href={`/${lang}/provider/${slug}`}
+  href={`/${lang}/provider/${slug}/`}
   class="provider-card block"
 >
   <div class="flex items-start gap-4">
@@ -62,12 +63,14 @@ const tags = rawTags.map(tag => {
         </div>
       )}
       {descText && <p class="text-sm text-gray-500 mt-2 line-clamp-2">{descText}</p>}
-      {provider.rating != null && provider.rating > 0 && (
-        <div class="flex items-center gap-1 mt-2">
-          <span class="text-yellow-500 text-sm">&#9733;</span>
-          <span class="text-sm text-gray-600">{provider.rating.toFixed(1)}</span>
-        </div>
-      )}
     </div>
+  </div>
+  <div class="provider-card-footer">
+    <span class="provider-rating">
+      {provider.rating != null && provider.rating > 0 ? (
+        <><span aria-hidden="true">★</span> {provider.rating.toFixed(1)}</>
+      ) : (lang === 'zh' ? '服务商资料' : 'Provider profile')}
+    </span>
+    <span class="provider-card-action">{lang === 'zh' ? '查看详情' : 'View details'} <span aria-hidden="true">→</span></span>
   </div>
 </a>

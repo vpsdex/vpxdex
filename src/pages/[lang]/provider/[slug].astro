@@ -4,10 +4,12 @@ import { locales, type Locale, isValidLocale } from '../../../i18n/config';
 import { t, getProviderAlternateUrl } from '../../../i18n/utils';
 import { getLogoUrl } from '../../../lib/r2';
 import { getDb } from '../../../lib/db';
-import { providers, providersContent } from '../../../db/schema';
+import { providers, providersContent, activities, activitiesContent } from '../../../db/schema';
 import { eq, and } from 'drizzle-orm';
 import { env } from 'cloudflare:workers';
 import { sanitizeRichText, richTextToPlainText } from '../../../lib/rich-text';
+import { parseStoredTags } from '../../../lib/validation';
+import { rankRelatedActivities } from '../../../lib/activity-related';
 
 const lang = Astro.params.lang as string;
 if (!isValidLocale(lang)) {
@@ -22,7 +24,7 @@ const field = lang === 'zh' ? 'slug_zh' : 'slug_en';
 const provider = await db
   .select()
  .from(providers)
-  .where(eq(providers[field], slug))
+  .where(and(eq(providers[field], slug), eq(providers.is_active, true)))
   .get();
 
 if (!provider) {
@@ -52,14 +54,43 @@ const metaDesc = content?.meta_desc
     : `${name} is a ${categoryLabel} provider. See detailed info, ratings and reviews on ${t(lang as Locale, 'site.brand')}.`);
 const logoUrl = getLogoUrl(provider.logo_key, provider.updated_at);
 
-const siteUrl = 'https://vpsdex.com';
+const providerSlug = lang === 'zh' ? provider.slug_zh : provider.slug_en;
+const activityRows = await db
+  .select({
+    id: activities.id,
+    slug: activitiesContent.slug,
+    title: activitiesContent.title,
+    publishedAt: activities.published_at,
+  })
+  .from(activities)
+  .innerJoin(
+    activitiesContent,
+    and(eq(activitiesContent.activity_id, activities.id), eq(activitiesContent.lang, lang)),
+  )
+  .where(eq(activities.is_active, true));
+const providerActivities = rankRelatedActivities(
+  activityRows.map((row) => ({
+    id: row.id,
+    slug: row.slug,
+    title: row.title,
+    publishedAt: row.publishedAt,
+  })),
+  { slug: providerSlug, title: name },
+  3,
+).filter((activity) => {
+  const haystack = `${activity.slug} ${activity.title}`.toLowerCase();
+  return haystack.includes(providerSlug.toLowerCase())
+    || haystack.includes(name.toLowerCase());
+});
+
+const siteUrl = Astro.site!.href.replace(/\/$/, '');
 const alternates = locales.map((l) => ({
   lang: l,
   href: `${siteUrl}${getProviderAlternateUrl(l, provider.slug_zh, provider.slug_en)}`,
 }));
 
 // Parse tags JSON (supports both old flat array and new bilingual format)
-const rawTags = provider.tags ? JSON.parse(provider.tags) : [];
+const rawTags = parseStoredTags(provider.tags);
 const tags = rawTags.map(tag => {
   if (typeof tag === 'string') return tag;
   return tag[lang] || tag.zh || tag.en || '';
@@ -76,41 +107,35 @@ const jsonLd = {
     : undefined,
 };
 
-// ===== SEO 增强：数据驱动 FAQ（不增加额外数据库查询） =====
-// FAQ 数据（利用已有字段：tags/rating/category/url）
 const categoryTagText = tags.length > 0 ? tags.slice(0, 6).join('、') : '';
 const ratingText = provider.rating != null && provider.rating > 0 ? provider.rating.toFixed(1) : null;
 const faqItems = [
   {
     q: lang === 'zh' ? `${name} 怎么样？` : `How is ${name}?`,
-    a:
-      lang === 'zh'
-        ? `${name} 是一家${categoryLabel}服务商${ratingText ? `，在 ${t(lang, 'site.brand')} 目录中的评分为 ${ratingText}/5` : ''}${categoryTagText ? `，主要特点包括：${categoryTagText}` : ''}。本页汇总了它的服务范围与适用场景，建议结合官网最新信息与用户评分综合判断。`
-        : `${name} is a ${categoryLabel} provider${ratingText ? ` rated ${ratingText}/5 on ${t(lang, 'site.brand')}` : ''}${categoryTagText ? `, known for: ${categoryTagText}` : ''}. This page summarizes its service scope and use cases; cross-check with the official site and user reviews.`,
+    a: lang === 'zh'
+      ? `${name} 是一家${categoryLabel}服务商${ratingText ? `，当前目录评分为 ${ratingText}/5` : ''}${categoryTagText ? `，主要特点包括：${categoryTagText}` : ''}。本页汇总其服务范围与适用场景；下单前请以官网最新价格、库存与条款为准。`
+      : `${name} is a ${categoryLabel} provider${ratingText ? ` currently rated ${ratingText}/5 in this directory` : ''}${categoryTagText ? `, with key attributes including ${categoryTagText}` : ''}. This page summarizes its services and use cases; verify current pricing, stock and terms on the official site before ordering.`,
   },
   {
-    q: lang === 'zh' ? `${name} 适合什么场景？` : `What is ${name} good for?`,
-    a:
-      lang === 'zh'
-        ? `根据目录收录信息，${name} 的服务定位围绕${categoryLabel}展开${categoryTagText ? `，标签「${categoryTagText}」反映了其主要优势方向` : ''}。选择前建议先明确自身需求（如节点位置、预算、流量要求），再对照官网的套餐与价格做决策；同类服务商可在本页下方对比。`
-        : `Based on directory data, ${name} focuses on ${categoryLabel} services${categoryTagText ? `; the tags "${categoryTagText}" reflect its main strengths` : ''}. Clarify your needs (location, budget, traffic) before comparing plans on the official site; see related providers below.`,
+    q: lang === 'zh' ? `${name} 适合什么场景？` : `What is ${name} suitable for?`,
+    a: lang === 'zh'
+      ? `${name} 的服务定位围绕${categoryLabel}展开${categoryTagText ? `，目录标签「${categoryTagText}」反映了主要方向` : ''}。选择前应先确认节点位置、预算、流量、退款和续费要求，再与同类服务商比较。`
+      : `${name} focuses on ${categoryLabel} services${categoryTagText ? `; the directory tags “${categoryTagText}” indicate its main positioning` : ''}. Check location, budget, traffic, refund and renewal requirements before comparing it with alternatives.`,
   },
   {
-    q: lang === 'zh' ? `如何访问 ${name} 官网？` : `How to visit ${name}?`,
-    a:
-      lang === 'zh'
-        ? `点击本页的「访问官网」按钮即可跳转 ${name} 官方网站。注册前建议核对套餐价格与条款的时效性，促销与库存会随时调整；如遇官网无法访问，可能是区域网络限制，可尝试更换网络环境。`
-        : `Click the "Visit Website" button to open the official ${name} site. Verify current pricing and terms before signing up, as promos and stock change frequently; if the site is unreachable, it may be a regional network issue.`,
+    q: lang === 'zh' ? `如何访问 ${name} 官网？` : `How do I visit ${name}?`,
+    a: lang === 'zh'
+      ? `点击本页的「访问官网」按钮即可打开 ${name} 官方网站。促销、库存和价格可能变化，请在付款前再次核对。`
+      : `Use the “Visit Website” button on this page to open the official ${name} website. Promotions, stock and prices may change, so verify them again before payment.`,
   },
 ];
-
 const faqJsonLd = {
   '@context': 'https://schema.org',
   '@type': 'FAQPage',
-  mainEntity: faqItems.map((f) => ({
+  mainEntity: faqItems.map((item) => ({
     '@type': 'Question',
-    name: f.q,
-    acceptedAnswer: { '@type': 'Answer', text: f.a },
+    name: item.q,
+    acceptedAnswer: { '@type': 'Answer', text: item.a },
   })),
 };
 ---
@@ -122,13 +147,14 @@ const faqJsonLd = {
   alternates={alternates}
   jsonLd={jsonLd}
   extraJsonLd={[faqJsonLd]}
+  xDefault={`${siteUrl}${getProviderAlternateUrl('zh', provider.slug_zh, provider.slug_en)}`}
 >
   <div class="max-w-4xl mx-auto pt-3">
     <a href={`/${lang}/`} class="text-sm text-gray-500 hover:text-gray-700 mb-6 inline-block">
       &larr; {t(lang, 'common.back')}
     </a>
 
-    <div class="bg-white rounded-xl border border-gray-200 p-6 sm:p-8 shadow-sm">
+    <div class="public-surface bg-white rounded-xl border border-gray-200 p-6 sm:p-8">
       <div class="flex items-start gap-6">
         <img
           src={logoUrl}
@@ -143,10 +169,15 @@ const faqJsonLd = {
             {t(lang, `categories.${provider.category}`)}
           </span>
           {provider.rating != null && provider.rating > 0 && (
-            <div class="flex items-center gap-1 mt-2">
-              <span class="text-yellow-500">&#9733;</span>
-              <span class="text-gray-700 font-medium">{provider.rating.toFixed(1)}</span>
-              <span class="text-gray-400 text-sm">/ 5</span>
+            <div class="mt-2">
+              <div class="flex items-center gap-1">
+                <span class="text-yellow-500">&#9733;</span>
+                <span class="text-gray-700 font-medium">{provider.rating.toFixed(1)}</span>
+                <span class="text-gray-600 text-sm">/ 5</span>
+              </div>
+              <p class="text-xs text-gray-600 mt-1">
+                {lang === 'zh' ? '编辑综合评分，不是用户评价平均分。' : 'Editorial composite, not a user-review average.'}
+              </p>
             </div>
           )}
           {tags.length > 0 && (
@@ -158,43 +189,71 @@ const faqJsonLd = {
               ))}
             </div>
           )}
+          <a
+            href={provider.url}
+            target="_blank"
+            rel="noopener noreferrer"
+            class="primary-action mt-4 inline-flex w-full sm:w-auto justify-center items-center gap-2 bg-gray-900 text-white px-5 py-2.5 rounded-lg hover:bg-gray-700 transition-colors text-sm font-medium"
+          >
+            {t(lang, 'provider.visit')} &rarr;
+          </a>
         </div>
       </div>
 
       {desc && (
         <div class="mt-6 pt-6 border-t border-gray-100">
           <h2 class="text-lg font-semibold text-gray-800 mb-2">{t(lang, 'provider.description')}</h2>
-          <div class="prose prose-sm max-w-none text-gray-600" set:html={sanitizeRichText(desc) || ''} />
+          <div class="provider-rich-content" set:html={sanitizeRichText(desc) || ''} />
         </div>
       )}
 
-      <div class="mt-6 pt-6 border-t border-gray-100">
-        <a
-          href={provider.url}
-          target="_blank"
-          rel="noopener noreferrer"
-          class="inline-flex items-center gap-2 bg-gray-900 text-white px-5 py-2.5 rounded-lg hover:bg-gray-700 transition-colors text-sm font-medium"
-        >
-          {t(lang, 'provider.visit')} &rarr;
-        </a>
+      {providerActivities.length > 0 && (
+        <section class="mt-6 pt-6 border-t border-gray-100" aria-labelledby="provider-reviews-heading">
+          <h2 id="provider-reviews-heading" class="text-lg font-semibold text-gray-800 mb-3">
+            {lang === 'zh' ? `${name} 评测与活动` : `${name} reviews and updates`}
+          </h2>
+          <ul class="space-y-2">
+            {providerActivities.map((activity) => (
+              <li>
+                <a class="text-blue-700 hover:text-blue-900 font-medium" href={`/${lang}/activity/${activity.slug}/`}>
+                  {activity.title} <span aria-hidden="true">→</span>
+                </a>
+              </li>
+            ))}
+          </ul>
+        </section>
+      )}
+
+      <div class="editorial-note mt-6 pt-6 border-t border-gray-100">
+        <p class="text-xs text-gray-600">
+          {lang === 'zh'
+            ? '信息由 VPSDEX 编辑整理；价格、库存与条款以服务商官网为准。'
+            : 'Information is reviewed by VPSDEX editors; pricing, stock and terms are subject to the provider website.'}
+        </p>
+        <p class="text-xs mt-2">
+          <a class="text-teal-700 hover:underline" href={`/${lang}/methodology/`}>
+            {lang === 'zh' ? '查看评测方法' : 'Review methodology'}
+          </a>
+          <span class="text-gray-400 mx-2">·</span>
+          <a class="text-teal-700 hover:underline" href={`/${lang}/disclosure/`}>
+            {lang === 'zh' ? '商业关系披露' : 'Commercial disclosure'}
+          </a>
+        </p>
       </div>
     </div>
 
-    <!-- FAQ 区块（数据驱动） -->
-    <div class="bg-white rounded-xl border border-gray-200 p-6 sm:p-8 shadow-sm mt-6">
-      <h2 class="text-lg font-semibold text-gray-800 mb-4">
-        {lang === 'zh' ? '常见问题' : 'FAQ'}
+    <section class="public-surface bg-white rounded-xl border border-gray-200 p-6 sm:p-8 mt-6" aria-labelledby="provider-faq">
+      <h2 id="provider-faq" class="text-lg font-semibold text-gray-800 mb-4">
+        {lang === 'zh' ? '常见问题' : 'Frequently asked questions'}
       </h2>
       <div class="space-y-5">
-        {faqItems.map((f) => (
+        {faqItems.map((item) => (
           <div>
-            <h3 class="font-semibold text-gray-900 text-sm mb-1">{f.q}</h3>
-            <p class="text-sm text-gray-600 leading-relaxed">{f.a}</p>
+            <h3 class="font-semibold text-gray-900 text-sm mb-1">{item.q}</h3>
+            <p class="text-sm text-gray-600 leading-relaxed">{item.a}</p>
           </div>
         ))}
       </div>
-    </div>
-
-
+    </section>
   </div>
 </BaseLayout>

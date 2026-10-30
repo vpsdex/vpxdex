@@ -1,0 +1,4 @@
+# 本地开发密钥模板:复制为 .dev.vars 并填入真实值。
+# .dev.vars 已被 .gitignore 忽略,真实密钥严禁提交到仓库。
+ADMIN_SESSION_SECRET=change-me-to-a-random-string
+API_BEARER_TOKEN=change-me-to-your-bearer-token
