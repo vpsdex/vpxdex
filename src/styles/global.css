@@ -616,12 +616,12 @@ html[lang='zh'] .footer-heading {
 /* ---------- Hero ---------- */
 
 .hero {
-  padding-top: 40px;
+  padding-top: 8px;
 }
 
 @media (min-width: 960px) {
   .hero {
-    padding-top: 56px;
+    padding-top: 16px;
   }
 }
 
@@ -630,7 +630,7 @@ html[lang='zh'] .footer-heading {
   grid-template-columns: minmax(0, 1fr);
   gap: 32px;
   border-top: 1px solid var(--rule);
-  padding-top: 28px;
+  padding-top: 24px;
 }
 
 @media (min-width: 960px) {
@@ -638,7 +638,7 @@ html[lang='zh'] .footer-heading {
     grid-template-columns: minmax(0, 1fr) 19rem;
     gap: 56px;
     align-items: start;
-    padding-top: 32px;
+    padding-top: 28px;
   }
 }
 
@@ -1745,10 +1745,6 @@ html[lang='zh'] .page-title {
 @media (max-width: 640px) {
   .header-inner {
     gap: 12px;
-  }
-
-  .hero {
-    padding-top: 32px;
   }
 
   .section-head {
