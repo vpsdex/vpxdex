@@ -1,17 +1,29 @@
 import { defaultLocale, type Locale, isValidLocale } from './config';
 import translations from './translations';
 
-export function t(lang: Locale, key: string): string {
+function lookup(lang: Locale, key: string): string | undefined {
   const keys = key.split('.');
   let result: Record<string, unknown> | string | undefined = translations[lang];
   for (const k of keys) {
     if (result && typeof result === 'object') {
       result = (result as Record<string, unknown>)[k] as typeof result;
     } else {
-      return key;
+      return undefined;
     }
   }
-  return typeof result === 'string' ? result : key;
+  return typeof result === 'string' ? result : undefined;
+}
+
+export function t(
+  lang: Locale,
+  key: string,
+  params?: Record<string, string | number>,
+): string {
+  const template = lookup(lang, key) ?? lookup(defaultLocale, key) ?? key;
+  if (!params) return template;
+  return template.replace(/\{(\w+)\}/g, (match, name: string) => (
+    Object.prototype.hasOwnProperty.call(params, name) ? String(params[name]) : match
+  ));
 }
 
 export function getLocaleFromUrl(url: URL): Locale {

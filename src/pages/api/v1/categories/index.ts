@@ -1,7 +1,7 @@
 import type { APIRoute } from 'astro';
 import { env } from 'cloudflare:workers';
 import { getDb } from '../../../../lib/db';
-import { activityCategories, activities } from '../../../../db/schema';
+import { activityCategories } from '../../../../db/schema';
 import { eq } from 'drizzle-orm';
 import { requireApiAuth, jsonResponse, handleCors } from '../../../../lib/api-auth';
 import { errorMessage, optionalText, RequestValidationError, validateSlug } from '../../../../lib/validation';

@@ -31,13 +31,6 @@ export const providersContent = sqliteTable(
   (table) => [uniqueIndex('provider_lang_idx').on(table.provider_id, table.lang)],
 );
 
-export const users = sqliteTable('users', {
-  id: integer('id').primaryKey({ autoIncrement: true }),
-  username: text('username').notNull().unique(),
-  password_hash: text('password_hash').notNull(),
-  created_at: text('created_at').notNull().default(sql`(datetime('now'))`),
-});
-
 // Activity categories (活动分类)
 export const activityCategories = sqliteTable('activity_categories', {
   id: integer('id').primaryKey({ autoIncrement: true }),

@@ -1,13 +1,11 @@
 ---
-import '../../../styles/global.css';
-import Header from '../../../components/Header.astro';
-import Footer from '../../../components/Footer.astro';
+import BaseLayout from '../../../layouts/BaseLayout.astro';
 import { t } from '../../../i18n/utils';
 import type { Locale } from '../../../i18n/config';
-import { isValidLocale, locales } from '../../../i18n/config';
+import { isValidLocale, locales, localeMeta } from '../../../i18n/config';
 import { getDb } from '../../../lib/db';
 import { activities, activitiesContent } from '../../../db/schema';
-import { eq, and, sql } from 'drizzle-orm';
+import { eq, and, desc, sql } from 'drizzle-orm';
 import { env } from 'cloudflare:workers';
 import { richTextToPlainText, sanitizeRichText } from '../../../lib/rich-text';
 import { getActivityImageUrl } from '../../../lib/r2';
@@ -105,10 +103,18 @@ if (slug !== activity.slug) {
   return Astro.redirect(`/${lang}/activity/${activity.slug}/`, 301);
 }
 
-// Increment view count
-await db.update(activities)
-  .set({ view_count: sql`${activities.view_count} + 1` })
-  .where(eq(activities.id, activityBasic.id));
+// Only count real page views: skip crawlers and browser prefetches so bots
+// cannot burn through the free-tier D1 write budget.
+const userAgent = Astro.request.headers.get('user-agent') || '';
+const isPrefetch = (Astro.request.headers.get('purpose') || '').includes('prefetch');
+const isBot = /bot|crawler|spider|slurp|bingpreview|facebookexternalhit|headless|lighthouse/i.test(userAgent);
+const shouldTrackView = !isPrefetch && !isBot;
+if (shouldTrackView) {
+  await db.update(activities)
+    .set({ view_count: sql`${activities.view_count} + 1` })
+    .where(eq(activities.id, activityBasic.id));
+}
+const displayViewCount = activity.viewCount + (shouldTrackView ? 1 : 0);
 
 // Rank related activities by shared provider/topic terms, then use recency only as fallback.
 const relatedRows = await db
@@ -127,7 +133,9 @@ const relatedRows = await db
   .where(and(
     eq(activities.is_active, true),
     sql`${activities.id} != ${activityBasic.id}`
-  ));
+  ))
+  .orderBy(desc(activities.published_at))
+  .limit(200);
 
 const relatedActivities = rankRelatedActivities(
   relatedRows.map((row) => ({
@@ -152,370 +160,186 @@ const pageDesc = activity.metaDesc || activity.description || richTextToPlainTex
 const siteUrl = Astro.site!.href.replace(/\/$/, '');
 const pageUrl = `${siteUrl}/${lang}/activity/${activity.slug}/`;
 const featuredImageUrl = activity.featuredImage ? `${siteUrl}${activity.featuredImage}` : null;
-const alternates = locales.map((l) => ({
-  lang: l,
-  href: `${siteUrl}/${l}/activity/${localizedSlugs.get(l) || activityBasic.baseSlug}/`,
+const availableLocales = locales.filter((locale) => localizedSlugs.has(locale));
+const xDefaultLocale = availableLocales.includes('zh') ? 'zh' : availableLocales[0];
+const alternates = availableLocales.map((locale) => ({
+  lang: locale,
+  href: `${siteUrl}/${locale}/activity/${localizedSlugs.get(locale)}/`,
 }));
-const xDefaultUrl = `${siteUrl}/zh/activity/${localizedSlugs.get('zh') || activityBasic.baseSlug}/`;
+const xDefaultUrl = `${siteUrl}/${xDefaultLocale}/activity/${localizedSlugs.get(xDefaultLocale)}/`;
 
 // Get content as plain text for SEO
 const contentText = richTextToPlainText(activity.content);
-const wordCount = contentText.split(/\s+/).length;
-const readingTime = Math.ceil(wordCount / 200); // Assume 200 words per minute
+const wordCount = lang === 'zh'
+  ? contentText.replace(/\s+/g, '').length
+  : contentText.split(/\s+/).filter(Boolean).length;
+const readingTime = Math.max(1, Math.ceil(lang === 'zh' ? wordCount / 400 : wordCount / 200));
+
+const articleJsonLd = {
+  '@context': 'https://schema.org',
+  '@type': 'Article',
+  headline: activity.title,
+  description: pageDesc,
+  url: pageUrl,
+  datePublished: activity.publishedAt,
+  dateModified: activity.publishedAt,
+  inLanguage: lang,
+  wordCount,
+  ...(featuredImageUrl && { image: featuredImageUrl }),
+  author: {
+    '@type': 'Organization',
+    name: siteName,
+  },
+  publisher: {
+    '@type': 'Organization',
+    name: siteName,
+    logo: {
+      '@type': 'ImageObject',
+      url: `${siteUrl}/logo.png`,
+    },
+  },
+  mainEntityOfPage: {
+    '@type': 'WebPage',
+    '@id': pageUrl,
+  },
+};
+
+const breadcrumbJsonLd = {
+  '@context': 'https://schema.org',
+  '@type': 'BreadcrumbList',
+  itemListElement: [
+    {
+      '@type': 'ListItem',
+      position: 1,
+      name: t(lang, 'nav.home'),
+      item: `${siteUrl}/${lang}/`,
+    },
+    {
+      '@type': 'ListItem',
+      position: 2,
+      name: t(lang, 'common.latestActivities'),
+      item: `${siteUrl}/${lang}/activities/`,
+    },
+    {
+      '@type': 'ListItem',
+      position: 3,
+      name: activity.title,
+      item: pageUrl,
+    },
+  ],
+};
+
+const fullTitle = `${pageTitle} - ${siteName}`;
 ---
 
-<!doctype html>
-<html lang={lang}>
-  <head>
-    <meta charset="utf-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <title>{pageTitle} - {siteName}</title>
-    <meta name="description" content={pageDesc} />
-    <meta name="robots" content="index, follow" />
-    <link rel="canonical" href={pageUrl} />
+<BaseLayout
+  title={fullTitle}
+  description={pageDesc}
+  lang={lang as Locale}
+  alternates={alternates}
+  jsonLd={articleJsonLd}
+  extraJsonLd={[breadcrumbJsonLd]}
+  xDefault={xDefaultUrl}
+  canonical={pageUrl}
+  image={featuredImageUrl || undefined}
+  ogType="article"
+  twitterCard={featuredImageUrl ? 'summary_large_image' : 'summary'}
+  publishedTime={activity.publishedAt}
+>
+  <nav class="breadcrumb" aria-label={t(lang, 'common.breadcrumb')}>
+    <a href={`/${lang}/`}>{t(lang, 'nav.home')}</a>
+    <span class="sep" aria-hidden="true">/</span>
+    <a href={`/${lang}/activities/`}>{t(lang, 'common.latestActivities')}</a>
+    <span class="sep" aria-hidden="true">/</span>
+    <span>{activity.title}</span>
+  </nav>
 
-    <!-- Open Graph -->
-    <meta property="og:title" content={pageTitle} />
-    <meta property="og:description" content={pageDesc} />
-    <meta property="og:type" content="article" />
-    <meta property="og:url" content={pageUrl} />
-    <meta property="og:locale" content={lang === 'zh' ? 'zh_CN' : 'en_US'} />
-    <meta property="og:site_name" content={siteName} />
-    {featuredImageUrl && <meta property="og:image" content={featuredImageUrl} />}
-    <meta property="article:published_time" content={activity.publishedAt} />
+  <div class="detail-grid">
+    <div class="detail-main">
+      <header class="article-head">
+        <p class="eyebrow is-plain">
+          {activity.isFeatured && <>{t(lang, 'common.featured')} · </>}
+          {activity.publishedAt.slice(0, 10)}
+        </p>
+        <h1 class="article-title">{activity.title}</h1>
 
-    <!-- Twitter Card -->
-    <meta name="twitter:card" content="summary_large_image" />
-    <meta name="twitter:title" content={pageTitle} />
-    <meta name="twitter:description" content={pageDesc} />
-    {featuredImageUrl && <meta name="twitter:image" content={featuredImageUrl} />}
+        {activity.description && <p class="article-desc">{activity.description}</p>}
 
-    <!-- Hreflang -->
-    {alternates.map((alt) => <link rel="alternate" hreflang={alt.lang} href={alt.href} />)}
-    <link rel="alternate" hreflang="x-default" href={xDefaultUrl} />
+        <div class="article-meta">
+          <time datetime={activity.publishedAt}>{activity.publishedAt.slice(0, 10)}</time>
+          <span class="sep" aria-hidden="true">·</span>
+          <span>{t(lang, 'common.minRead', { count: readingTime })}</span>
+          <span class="sep" aria-hidden="true">·</span>
+          <span>{t(lang, 'common.viewCount', { count: displayViewCount })}</span>
+        </div>
 
-    <!-- Schema.org structured data for Article -->
-    <script type="application/ld+json" set:html={JSON.stringify({
-      "@context": "https://schema.org",
-      "@type": "Article",
-      "headline": activity.title,
-      "description": pageDesc,
-      "url": pageUrl,
-      "datePublished": activity.publishedAt,
-      "dateModified": activity.publishedAt,
-      "inLanguage": lang,
-      "wordCount": wordCount,
-      ...(featuredImageUrl && { "image": featuredImageUrl }),
-      "author": {
-        "@type": "Organization",
-        "name": siteName
-      },
-      "publisher": {
-        "@type": "Organization",
-        "name": siteName,
-        "logo": {
-          "@type": "ImageObject",
-          "url": `${siteUrl}/favicon.svg`
-        }
-      },
-      "mainEntityOfPage": {
-        "@type": "WebPage",
-        "@id": pageUrl
-      }
-    })} />
+        <div class="mobile-facts">
+          <div class="mobile-fact">
+            <span class="mobile-fact-label">{t(lang, 'common.published')}</span>
+            <span class="mobile-fact-value">{activity.publishedAt.slice(0, 10)}</span>
+          </div>
+          <div class="mobile-fact">
+            <span class="mobile-fact-label">{t(lang, 'common.read')}</span>
+            <span class="mobile-fact-value">{readingTime} {t(lang, 'common.minutes')}</span>
+          </div>
+          <div class="mobile-fact">
+            <span class="mobile-fact-label">{t(lang, 'common.views')}</span>
+            <span class="mobile-fact-value">{displayViewCount}</span>
+          </div>
+        </div>
+      </header>
 
-    <!-- Breadcrumb Schema -->
-    <script type="application/ld+json" set:html={JSON.stringify({
-      "@context": "https://schema.org",
-      "@type": "BreadcrumbList",
-      "itemListElement": [
-        {
-          "@type": "ListItem",
-          "position": 1,
-          "name": siteName,
-          "item": `${siteUrl}/${lang}/`
-        },
-        {
-          "@type": "ListItem",
-          "position": 2,
-          "name": lang === 'zh' ? "最新活动" : "Latest Activities",
-          "item": `${siteUrl}/${lang}/activities/`
-        },
-        {
-          "@type": "ListItem",
-          "position": 3,
-          "name": activity.title,
-          "item": pageUrl
-        }
-      ]
-    })} />
-  </head>
-  <body class="min-h-screen bg-gray-50 text-gray-900 flex flex-col">
-    <Header lang={lang} alternates={alternates} />
-
-    <main class="flex-1 container mx-auto px-4 py-8 max-w-4xl">
-      <!-- Breadcrumb -->
-      <nav class="flex items-center gap-2 text-sm text-gray-500 mb-6">
-        <a href={`/${lang}/`} class="hover:text-gray-700">{siteName}</a>
-        <span>/</span>
-        <a href={`/${lang}/activities/`} class="hover:text-gray-700">
-          {lang === 'zh' ? '最新活动' : 'Latest Activities'}
-        </a>
-        <span>/</span>
-        <span class="text-gray-900">{activity.title}</span>
-      </nav>
-
-      <!-- Article Header -->
-      <article class="article-shell bg-white border border-gray-200 overflow-hidden mb-8">
-        {activity.featuredImage && (
+      {activity.featuredImage && (
+        <figure class="article-media">
           <img
             src={activity.featuredImage}
             alt={activity.title}
             width="960"
             height="540"
             fetchpriority="high"
-            class="aspect-video w-full border-b border-gray-100 object-cover"
           />
-        )}
-        <header class="article-header px-8 pt-8 pb-6 border-b border-gray-100">
-          {activity.isFeatured && (
-            <div class="flex items-center gap-2 mb-4">
-              <span class="px-3 py-1 rounded-full text-xs font-medium bg-yellow-100 text-yellow-800">
-                ⭐ {lang === 'zh' ? '推荐' : 'Featured'}
-              </span>
-            </div>
-          )}
+        </figure>
+      )}
 
-          <h1 class="text-3xl md:text-4xl font-bold leading-tight mb-3">{activity.title}</h1>
+      <div class="article-body rich-content">
+        <div set:html={sanitizeRichText(activity.content) || '<p>' + richTextToPlainText(activity.content) + '</p>'} />
+      </div>
 
-          {activity.description && (
-            <p class="text-lg text-gray-600 mb-5 leading-relaxed">{activity.description}</p>
-          )}
-
-          <div class="flex items-center gap-3 text-sm text-gray-500">
-            <time datetime={activity.publishedAt}>
-              {new Date(activity.publishedAt).toLocaleDateString(lang === 'zh' ? 'zh-CN' : 'en-US', {
-                year: 'numeric',
-                month: 'long',
-                day: 'numeric'
-              })}
-            </time>
-            <span class="text-gray-300">|</span>
-            <span>{readingTime} {lang === 'zh' ? '分钟阅读' : 'min read'}</span>
-            <span class="text-gray-300">|</span>
-            <span>{activity.viewCount + 1} {lang === 'zh' ? '次浏览' : 'views'}</span>
-          </div>
-        </header>
-
-        <!-- Article Content -->
-        <div class="rich-content px-8 py-8">
-          <div set:html={sanitizeRichText(activity.content) || '<p>' + richTextToPlainText(activity.content) + '</p>'} />
-        </div>
-      </article>
-
-      <!-- Related Activities -->
       {relatedActivities.length > 0 && (
-        <section class="related-panel bg-white border border-gray-200 p-6">
-          <h2 class="text-2xl font-bold mb-6">
-            {lang === 'zh' ? '相关活动' : 'Related Activities'}
+        <section class="provider-section" aria-labelledby="related-activities-heading">
+          <h2 id="related-activities-heading" class="side-heading">
+            {t(lang, 'activity.related')}
           </h2>
-          <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+          <ul class="related-list">
             {relatedActivities.map((related) => (
-              <a href={`/${lang}/activity/${related.slug}/`} class="related-card block p-4 rounded-lg border border-gray-200 transition-all">
-                <div class="text-xs text-gray-500 mb-2">
-                  {new Date(related.publishedAt).toLocaleDateString(lang === 'zh' ? 'zh-CN' : 'en-US')}
-                </div>
-                <h3 class="font-semibold mb-2 line-clamp-2">{related.title}</h3>
-              </a>
+              <li>
+                <a href={`/${lang}/activity/${related.slug}/`}>
+                  <span>{related.title}</span>
+                  <time datetime={related.publishedAt}>{related.publishedAt.slice(0, 10)}</time>
+                </a>
+              </li>
             ))}
-          </div>
+          </ul>
         </section>
       )}
-    </main>
+    </div>
 
-    <Footer lang={lang} />
-  </body>
-</html>
-
-<style>
-  /* ===== 文章正文排版 ===== */
-  .rich-content {
-    font-size: 1.0625rem;
-    line-height: 1.9;
-    color: #333a47;
-    word-wrap: break-word;
-    overflow-wrap: break-word;
-  }
-
-  /* 段落：增加首行缩进替代方案——用更大的段间距保持呼吸感 */
-  :global(.rich-content p) {
-    margin: 0 0 1.4em;
-  }
-
-  /* 标题层级 */
-  :global(.rich-content h2) {
-    position: relative;
-    font-size: 1.55rem;
-    font-weight: 750;
-    color: var(--theme-primary);
-    line-height: 1.35;
-    margin: 1.65em 0 0.9em;
-    padding: 0.55em 0 0.55em 1.05em;
-    border-bottom: 1px solid color-mix(in srgb, var(--theme-border) 82%, transparent);
-    letter-spacing: 0;
-    background:
-      linear-gradient(
-        90deg,
-        color-mix(in srgb, var(--theme-primary-soft) 70%, transparent),
-        transparent 78%
-      );
-    border-radius: 0.35rem 0 0 0.35rem;
-  }
-
-  :global(.rich-content h2::before) {
-    content: '';
-    position: absolute;
-    left: 0;
-    top: 0.52em;
-    bottom: 0.52em;
-    width: 0.28rem;
-    border-radius: 999px;
-    background-color: var(--theme-accent);
-    box-shadow: 0 0 0 3px color-mix(in srgb, var(--theme-accent-soft) 80%, transparent);
-  }
-
-  :global(.rich-content h2::after) {
-    content: '';
-    position: absolute;
-    left: 1.05em;
-    right: 0;
-    bottom: -1px;
-    height: 1px;
-    background: linear-gradient(
-      90deg,
-      color-mix(in srgb, var(--theme-accent) 45%, transparent),
-      transparent 62%
-    );
-  }
-
-  :global(.rich-content h3) {
-    font-size: 1.25rem;
-    font-weight: 600;
-    color: var(--theme-primary);
-    margin: 2em 0 0.8em;
-  }
-
-  /* 列表：清晰的缩进与间距 */
-  :global(.rich-content ul),
-  :global(.rich-content ol) {
-    margin: 0 0 1.4em;
-    padding-left: 1.75em;
-  }
-
-  :global(.rich-content li) {
-    margin-bottom: 0.5em;
-    padding-left: 0.25em;
-  }
-
-  :global(.rich-content ul > li) {
-    list-style-type: disc;
-  }
-
-  :global(.rich-content ol > li) {
-    list-style-type: decimal;
-  }
-
-  /* 引用块：与暖色主题协调的左边框 */
-  :global(.rich-content blockquote) {
-    border-left: 4px solid var(--theme-accent);
-    background-color: var(--theme-accent-soft);
-    padding: 1em 1.25em;
-    margin: 0 0 1.4em;
-    border-radius: 0 0.375rem 0.375rem 0;
-    color: #5a4a42;
-    font-style: italic;
-  }
-
-  :global(.rich-content blockquote p:last-child) {
-    margin-bottom: 0;
-  }
-
-  /* 行内代码 */
-  :global(.rich-content code) {
-    background-color: rgba(15, 50, 91, 0.08);
-    color: var(--theme-accent);
-    padding: 0.15em 0.4em;
-    border-radius: 0.25rem;
-    font-size: 0.875em;
-    font-family: 'SF Mono', 'Fira Code', 'Consolas', monospace;
-  }
-
-  /* 代码块 */
-  :global(.rich-content pre) {
-    background-color: var(--theme-primary);
-    color: #e8eef5;
-    padding: 1.1em 1.25em;
-    border-radius: 0.5rem;
-    overflow-x: auto;
-    margin: 0 0 1.4em;
-    font-size: 0.9rem;
-    line-height: 1.65;
-  }
-
-  :global(.rich-content pre code) {
-    background-color: transparent;
-    color: inherit;
-    padding: 0;
-    border-radius: 0;
-    font-size: inherit;
-  }
-
-  /* 图片：居中、圆角、阴影 */
-  :global(.rich-content img) {
-    max-width: 100%;
-    height: auto;
-    border-radius: 0.5rem;
-    margin: 1.75em auto;
-    display: block;
-    box-shadow: 0 1px 3px rgba(0, 0, 0, 0.08);
-  }
-
-  /* 加粗与斜体 */
-  :global(.rich-content strong) {
-    font-weight: 650;
-    color: var(--theme-primary);
-  }
-
-  :global(.rich-content em) {
-    color: #555;
-  }
-
-  /* 分割线 */
-  :global(.rich-content hr) {
-    margin: 2.5em 0;
-    border: none;
-    height: 1px;
-    background: linear-gradient(to right, transparent, var(--theme-border), transparent);
-  }
-
-  /* 链接 */
-  :global(.rich-content a) {
-    color: var(--theme-accent);
-    text-decoration: underline;
-    text-decoration-color: color-mix(in srgb, var(--theme-accent) 35%, transparent);
-    text-underline-offset: 2px;
-    transition: text-decoration-color 0.15s;
-  }
-
-  :global(.rich-content a:hover) {
-    text-decoration-color: var(--theme-accent);
-  }
-
-  /* 相关文章卡片截断 */
-  .line-clamp-2 {
-    display: -webkit-box;
-    -webkit-line-clamp: 2;
-    -webkit-box-orient: vertical;
-    overflow: hidden;
-  }
-</style>
+    <aside class="detail-aside" aria-label={t(lang, 'activity.factsAria')}>
+      <div class="detail-aside-inner">
+        <div class="side-block">
+          <h2 class="side-heading">{t(lang, 'common.record')}</h2>
+          <dl class="kv">
+            <dt>{t(lang, 'common.published')}</dt>
+            <dd>{activity.publishedAt.slice(0, 10)}</dd>
+            <dt>{t(lang, 'common.read')}</dt>
+            <dd>{readingTime} {t(lang, 'common.minutes')}</dd>
+            <dt>{t(lang, 'common.views')}</dt>
+            <dd>{displayViewCount}</dd>
+            <dt>{t(lang, 'common.language')}</dt>
+            <dd>{localeMeta[lang].languageName}</dd>
+          </dl>
+        </div>
+      </div>
+    </aside>
+  </div>
+</BaseLayout>

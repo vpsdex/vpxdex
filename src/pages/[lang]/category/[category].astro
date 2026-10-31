@@ -32,7 +32,14 @@ if (currentPage < 1 || (pageParam !== null && (currentPage === 1 || !/^\d+$/.tes
 }
 
 const whereClause = and(eq(providers.is_active, true), eq(providers.category, category));
-const [{ total }] = await db.select({ total: count() }).from(providers).where(whereClause);
+const [{ total }] = await db
+  .select({ total: count() })
+  .from(providers)
+  .innerJoin(
+    providersContent,
+    and(eq(providers.id, providersContent.provider_id), eq(providersContent.lang, locale)),
+  )
+  .where(whereClause);
 const totalPages = Math.max(1, Math.ceil(total / pageSize));
 
 if (currentPage > totalPages) {
@@ -45,7 +52,7 @@ if (currentPage > totalPages) {
 const rows = await db
   .select()
   .from(providers)
-  .leftJoin(
+  .innerJoin(
     providersContent,
     and(eq(providers.id, providersContent.provider_id), eq(providersContent.lang, locale)),
   )
@@ -62,12 +69,14 @@ const alternates = locales.map((targetLocale) => ({
   lang: targetLocale,
   href: `${siteUrl}/${targetLocale}/category/${category}/${pageSuffix}`,
 }));
-const title = locale === 'zh'
-  ? `${categoryLabel}服务商推荐与对比${currentPage > 1 ? ` - 第 ${currentPage} 页` : ''} | VPSDEX`
-  : `Best ${categoryLabel} Providers & Comparisons${currentPage > 1 ? ` - Page ${currentPage}` : ''} | VPSDEX`;
-const description = locale === 'zh'
-  ? `浏览 VPSDEX 收录的${categoryLabel}服务商，比较产品定位、评分、适用场景和重要风险信息。`
-  : `Browse ${categoryLabel} providers listed by VPSDEX and compare positioning, ratings, use cases and important risk notes.`;
+const pageSuffixLabel = currentPage > 1
+  ? t(locale, 'common.pageSuffix', { page: currentPage })
+  : '';
+const title = t(locale, 'category.seoTitle', {
+  category: categoryLabel,
+  page: pageSuffixLabel,
+});
+const description = t(locale, 'category.seoDescription', { category: categoryLabel });
 
 const collectionJsonLd = {
   '@context': 'https://schema.org',
@@ -85,7 +94,7 @@ const collectionJsonLd = {
         '@type': 'ListItem',
         position: (currentPage - 1) * pageSize + index + 1,
         url: `${siteUrl}/${locale}/provider/${slug}/`,
-        name: row.providers_content?.name || slug,
+        name: row.providers_content.name,
       };
     }),
   },
@@ -113,39 +122,73 @@ const breadcrumbJsonLd = {
   prev={currentPage > 1 ? `${siteUrl}${basePath}${currentPage > 2 ? `?page=${currentPage - 1}` : ''}` : undefined}
   next={currentPage < totalPages ? `${siteUrl}${basePath}?page=${currentPage + 1}` : undefined}
 >
-  <section class="home-hero mb-8">
-    <nav class="text-sm text-gray-500 mb-4" aria-label={locale === 'zh' ? '面包屑' : 'Breadcrumb'}>
-      <a href={`/${locale}/`} class="hover:text-gray-900">{t(locale, 'nav.home')}</a>
-      <span aria-hidden="true"> / </span>
-      <span>{categoryLabel}</span>
-    </nav>
-    <p class="eyebrow">{locale === 'zh' ? '服务商类目' : 'Provider category'}</p>
-    <h1 class="hero-title">{categoryLabel}</h1>
-    <p class="hero-copy">{description}</p>
+  <nav class="breadcrumb" aria-label={t(locale, 'common.breadcrumb')}>
+    <a href={`/${locale}/`}>{t(locale, 'nav.home')}</a>
+    <span class="sep" aria-hidden="true">/</span>
+    <span>{categoryLabel}</span>
+  </nav>
+
+  <section class="hero">
+    <div class="hero-grid">
+      <div>
+        <p class="eyebrow">{t(locale, 'category.eyebrow')}</p>
+        <h1 class="hero-title">{categoryLabel}</h1>
+        <p class="hero-copy">{description}</p>
+        <div class="hero-actions">
+          <a class="btn" href={`/${locale}/activities/`}>
+            {t(locale, 'category.latestActivities')}
+          </a>
+          <a class="text-link" href={`/${locale}/methodology/`}>
+            {t(locale, 'common.method')} →
+          </a>
+        </div>
+      </div>
+
+      <div class="hero-facts" aria-label={t(locale, 'category.factsAria')}>
+        <div class="fact-row">
+          <span class="fact-label">{t(locale, 'category.listed')}</span>
+          <span class="fact-value">{String(total).padStart(2, '0')}</span>
+        </div>
+        <div class="fact-row">
+          <span class="fact-label">{t(locale, 'common.page')}</span>
+          <span class="fact-value">{String(currentPage).padStart(2, '0')} / {String(totalPages).padStart(2, '0')}</span>
+        </div>
+        <div class="fact-row">
+          <span class="fact-label">{t(locale, 'home.lastReviewed')}</span>
+          <span class="fact-value">
+            {rows.reduce((latest, row) => (row.providers.updated_at > latest ? row.providers.updated_at : latest), '').slice(0, 10) || '—'}
+          </span>
+        </div>
+      </div>
+    </div>
   </section>
 
-  <div class="category-heading">
-    <h2 class="text-xl font-semibold text-gray-800">
-      {locale === 'zh' ? `全部${categoryLabel}服务商` : `All ${categoryLabel} providers`}
-    </h2>
-    <span class="category-count">{total} {locale === 'zh' ? '家服务商' : 'providers'}</span>
-  </div>
+  <section class="section-gap">
+    <div class="section-head">
+      <h2 class="section-title">
+        {t(locale, 'category.allProviders', { category: categoryLabel })}
+      </h2>
+      <div class="section-side">
+        <span class="section-count">{String(rows.length).padStart(2, '0')} / {String(total).padStart(2, '0')}</span>
+      </div>
+    </div>
 
-  {rows.length > 0 ? (
-    <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-      {rows.map((row) => (
-        <ProviderCard
-          provider={row.providers}
-          content={row.providers_content || { name: row.providers.slug_en, desc: null }}
-          lang={locale}
-        />
-      ))}
-    </div>
-  ) : (
-    <div class="admin-empty-state rounded-xl border border-gray-200 bg-white">
-      {locale === 'zh' ? '该类目暂未收录服务商。' : 'No providers have been listed in this category yet.'}
-    </div>
-  )}
+    {rows.length > 0 ? (
+      <div class="hair-grid">
+        {rows.map((row) => (
+          <ProviderCard
+            provider={row.providers}
+            content={row.providers_content}
+            lang={locale}
+          />
+        ))}
+      </div>
+    ) : (
+      <p class="empty-state">
+        {t(locale, 'category.empty')}
+      </p>
+    )}
+  </section>
 
   <Pagination
     currentPage={currentPage}

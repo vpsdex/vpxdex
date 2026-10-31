@@ -29,6 +29,5 @@
 		}
 	]
 	// Secrets (set via `wrangler secret put`):
-	// ADMIN_SESSION_SECRET  - HMAC signing key for admin sessions
 	// API_BEARER_TOKEN     - Bearer token for external API access (Hermes agent)
 }

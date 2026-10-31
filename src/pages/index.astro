@@ -1,8 +1,4 @@
 ---
-import { defaultLocale } from '../i18n/config';
-if (Astro.url.pathname === '/' || Astro.url.pathname === '') {
-  return Astro.redirect(`/${defaultLocale}/`);
-}
 return new Response('Not Found', {
   status: 404,
   headers: { 'content-type': 'text/plain; charset=utf-8' },

@@ -8,7 +8,16 @@ auth_type: "Bearer Token"
 
 # VPS Directory 内容管理技能
 
-本技能用于通过 REST API 管理 vpsdex.com 的服务商、活动、内部兼容分类和图片。活动分类不再显示于公开页面和后台界面，但 v1 API 仍保留 `category_id` 以兼容现有数据结构。
+本技能用于通过 REST API 管理 vpsdex.com 的服务商、活动、内部兼容分类和图片。站点不提供后台界面或登录功能，本 API 是唯一的内容发布方式。活动分类不再显示于公开页面，但 v1 API 仍保留 `category_id` 以兼容现有数据结构。
+
+## 双语要求（强制）
+
+所有服务商与活动内容必须同时包含 `zh` 和 `en` 两种语言：
+
+- 创建时 `contents` 必须同时包含 `lang: "zh"` 和 `lang: "en"`，缺少任一语言返回 `400`。
+- 更新时如果提交 `contents`，写入后该记录的语言集合必须同时包含 `zh` 和 `en`。可以只提交其中一种语言，但另一种语言必须已经存在。
+- 两种语言在同一请求中不能重复出现。
+- 历史单语数据不会自动补全；请通过 `GET` 读取后用 `PUT` 补齐缺失语言，否则该语言页面不会出现在 sitemap 和 hreflang 中。
 
 ## 认证
 
@@ -87,6 +96,7 @@ Content-Type: application/json
   "rating": 4.0,
   "tags": ["标签1", "标签2"],
   "is_active": true,
+  "logo_key": "logos/1717200000000-a1b2c3d4.png",
   "contents": [
     {
       "lang": "zh",
@@ -106,7 +116,9 @@ Content-Type: application/json
 }
 ```
 
-**必填字段**: `slug_zh`, `slug_en`, `url`, `category`, `contents`（至少一个语言）
+**必填字段**: `slug_zh`, `slug_en`, `url`, `category`, `contents`（必须同时包含 `zh` 和 `en`）
+
+**可选字段**: `logo_key`，必须使用 `logos/` 前缀，通常取自 `POST /api/v1/upload` 且 `type=logo` 的返回值。
 
 **响应**: `201 Created` → `{ "success": true, "id": 16 }`
 
@@ -117,7 +129,7 @@ PUT /api/v1/providers/{id}
 Content-Type: application/json
 ```
 
-所有字段均为可选，仅更新提供的字段。`contents` 数组中的内容会按 `lang` 自动新增或更新。
+所有字段均为可选，仅更新提供的字段。`contents` 数组中的内容会按 `lang` 自动新增或更新；提交 `contents` 时，更新后的语言集合必须同时包含 `zh` 和 `en`。可以只提交一种语言，但另一种语言必须已存在。
 
 ### 1.5 删除服务商
 
@@ -207,7 +219,7 @@ Content-Type: application/json
 }
 ```
 
-**必填字段**: `slug`, `category_id`, `contents`（至少一个语言）
+**必填字段**: `slug`, `category_id`, `contents`（必须同时包含 `zh` 和 `en`）
 
 > **注意**: `category_id` 必须是已存在的分类 ID。可通过 `GET /api/v1/categories` 查询。
 
@@ -219,7 +231,7 @@ Content-Type: application/json
 PUT /api/v1/activities/{id}
 ```
 
-所有字段可选。更新 `contents` 时按 `lang` 自动新增或更新。将 `featured_image_key` 设置为新的 `activity-images/` 键可更换特色图，设置为 `null` 可移除特色图；更换或移除后会清理旧 R2 对象。
+所有字段可选。更新 `contents` 时按 `lang` 自动新增或更新；提交 `contents` 时，更新后的语言集合必须同时包含 `zh` 和 `en`。将 `featured_image_key` 设置为新的 `activity-images/` 键可更换特色图，设置为 `null` 可移除特色图；更换或移除后会清理旧 R2 对象。
 
 ### 2.5 删除活动
 
@@ -233,7 +245,7 @@ DELETE /api/v1/activities/{id}
 
 ## 三、内部分类兼容 API
 
-> 分类仅为兼容 `activities.category_id` 非空关系而保留，不再用于公开筛选、卡片标签或后台表单。除非维护旧 API 数据，不应新建或调整分类。
+> 分类仅为兼容 `activities.category_id` 非空关系而保留，不再用于公开筛选或卡片标签。除非维护旧 API 数据，不应新建或调整分类。
 
 ### 3.1 获取所有分类
 
@@ -380,6 +392,10 @@ Content-Type: multipart/form-data
        "lang": "zh",
        "title": "新促销活动",
        "content": "<p>活动详情</p>"
+     }, {
+       "lang": "en",
+       "title": "New promotion",
+       "content": "<p>Activity details</p>"
      }]
    }
    ```
@@ -404,7 +420,10 @@ Content-Type: multipart/form-data
      "url": "https://newvps.com",
      "category": "vps",
      "logo_key": "logos/xxx.png",
-     "contents": [{ "lang": "zh", "name": "新VPS", "desc": "描述" }]
+     "contents": [
+       { "lang": "zh", "name": "新VPS", "desc": "描述" },
+       { "lang": "en", "name": "New VPS", "desc": "Description" }
+     ]
    }
    ```
 
@@ -435,6 +454,7 @@ Content-Type: multipart/form-data
    PUT /api/v1/providers/5
    { "rating": 4.8, "contents": [{ "lang": "zh", "name": "更新后的名称", "desc": "新描述" }] }
    ```
+   > 如果该服务商此前只有中文内容，这次更新会因缺少 `en` 返回 `400`。请在同一次请求中同时提交英文内容，或先补齐英文内容。
 
 ---
 
@@ -465,6 +485,6 @@ API 已配置 CORS，支持从浏览器端直接调用。支持 `OPTIONS` 预检
 
 ## 安全须知
 
-- Bearer Token 等同于管理员权限，请妥善保管
+- Bearer Token 等同于完整的内容发布权限，请妥善保管
 - 生产环境请通过 `wrangler secret put API_BEARER_TOKEN` 设置密钥
 - 如需更换密钥，更新 Cloudflare 环境变量后即可生效，无需重新部署

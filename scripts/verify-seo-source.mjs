@@ -6,7 +6,7 @@ import { fileURLToPath } from 'node:url';
 // pathname 在 Windows 上是 /C:/... 形式,必须用 fileURLToPath 转成原生路径
 const root = fileURLToPath(new URL('..', import.meta.url));
 const read = (path) => readFile(join(root, path), 'utf8');
-const [seo, activity, activityList, provider, home, category, pagination, card, utils, middleware, trust, sitemap] = await Promise.all([
+const [seo, activity, activityList, provider, home, category, pagination, card, utils, middleware, trust, sitemap, providerApi, providerUpdateApi, activityApi, activityUpdateApi] = await Promise.all([
   read('src/components/SEO.astro'),
   read('src/pages/[lang]/activity/[slug].astro'),
   read('src/pages/[lang]/activities/index.astro'),
@@ -19,15 +19,22 @@ const [seo, activity, activityList, provider, home, category, pagination, card, 
   read('src/middleware.ts'),
   read('src/pages/[lang]/[page].astro'),
   read('src/pages/sitemap.xml.ts'),
+  read('src/pages/api/v1/providers/index.ts'),
+  read('src/pages/api/v1/providers/[id].ts'),
+  read('src/pages/api/v1/activities/index.ts'),
+  read('src/pages/api/v1/activities/[id].ts'),
 ]);
 
 for (const source of [seo, activity, provider, home, category, sitemap]) {
   assert(!source.includes('Astro.url.origin'), 'Production SEO URL must not depend on request origin');
   assert(!source.includes('Astro.url.href'), 'Canonical must not include query parameters');
 }
-assert(activity.includes('localizedSlugs.get(l)'), 'Activity hreflang must use each locale content slug');
+assert(activity.includes('localizedSlugs.get(locale)'), 'Activity hreflang must use each locale content slug');
+assert(activity.includes('availableLocales'), 'Activity hreflang must only include existing translations');
 assert(activity.includes('xDefaultUrl'), 'Activity pages need a localized x-default URL');
-assert(provider.includes("getProviderAlternateUrl('zh'"), 'Provider x-default must point to its Chinese detail page');
+assert(provider.includes('getProviderAlternateUrl(xDefaultLocale'), 'Provider x-default must follow the available translation');
+assert(provider.includes('if (!content)'), 'Provider pages must 404 when the current locale has no content');
+assert(provider.includes('availableLocales'), 'Provider hreflang must only include existing translations');
 assert(utils.includes('provider/${slug}/`'), 'Provider alternate helper must emit a trailing slash');
 assert(card.includes('provider/${slug}/`'), 'Provider cards must link directly to canonical slash URLs');
 assert(home.includes('provider/${escapeHtml(slug)}/'), 'Client-rendered provider cards must keep canonical slashes');
@@ -49,4 +56,15 @@ for (const page of ['about', 'methodology', 'disclosure', 'contact', 'privacy', 
   assert(sitemap.includes(`'${page}'`), `Missing trust page in sitemap: ${page}`);
 }
 assert(provider.includes("'@type': 'FAQPage'"), 'Provider FAQ schema must be retained');
+assert(seo.includes('og:locale:alternate'), 'SEO must emit alternate Open Graph locales');
+assert(seo.includes('resolvedXDefault'), 'SEO must derive x-default from actual alternates');
+assert(utils.includes('lookup(defaultLocale'), 'Translation lookup must fall back to the default locale');
+assert(sitemap.includes('providerLanguages'), 'Sitemap providers must be filtered by available translations');
+assert(sitemap.includes('availableLocales'), 'Sitemap hreflang must only include existing translations');
+assert(!/inArray\(\s*providersContent\.provider_id/.test(sitemap), 'Sitemap must not bind all provider ids in one D1 query (100-parameter limit)');
+assert(!sitemap.includes('slugs?.get(\'en\') || a.slug'), 'Sitemap must not fall back to a slug without content');
+assert(activityList.includes('.innerJoin('), 'Activity list must only count rows with the current locale');
+for (const api of [providerApi, providerUpdateApi, activityApi, activityUpdateApi]) {
+  assert(api.includes('assertBilingualContent'), 'Publishing APIs must enforce bilingual content');
+}
 console.log('VPSDex SEO source verification passed');

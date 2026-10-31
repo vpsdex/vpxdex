@@ -1,8 +1,8 @@
 import type { APIRoute } from 'astro';
 import { env } from 'cloudflare:workers';
 import { getDb } from '../lib/db';
-import { providers, activities, activitiesContent } from '../db/schema';
-import { eq, and } from 'drizzle-orm';
+import { providers, providersContent, activities, activitiesContent } from '../db/schema';
+import { eq, inArray } from 'drizzle-orm';
 import { locales } from '../i18n/config';
 import { providerCategories } from '../lib/provider-categories';
 
@@ -34,6 +34,7 @@ export const GET: APIRoute = async ({ site }) => {
     <changefreq>daily</changefreq>
     <priority>1.0</priority>
 ${hreflangs}
+    <xhtml:link rel="alternate" hreflang="x-default" href="${baseUrl}/zh/" />
   </url>`);
   }
 
@@ -63,6 +64,7 @@ ${hreflangs}
     <changefreq>daily</changefreq>
     <priority>0.9</priority>
 ${hreflangs}
+    <xhtml:link rel="alternate" hreflang="x-default" href="${baseUrl}/zh/activities/" />
   </url>`);
   }
 
@@ -86,6 +88,7 @@ ${hreflangs}
   // --- 服务商详情页 ---
   const allProviders = await db
     .select({
+      id: providers.id,
       slug_zh: providers.slug_zh,
       slug_en: providers.slug_en,
       updated_at: providers.updated_at,
@@ -93,17 +96,44 @@ ${hreflangs}
     .from(providers)
     .where(eq(providers.is_active, true));
 
+  // D1 单条语句最多绑定 100 个参数，不能把全部 provider id 塞进 inArray
+  const providerContentRows = await db
+    .select({
+      provider_id: providersContent.provider_id,
+      lang: providersContent.lang,
+    })
+    .from(providersContent);
+  const providerLanguages = new Map<number, Set<string>>();
+  for (const row of providerContentRows) {
+    if (!providerLanguages.has(row.provider_id)) {
+      providerLanguages.set(row.provider_id, new Set());
+    }
+    providerLanguages.get(row.provider_id)!.add(row.lang);
+  }
+
   for (const p of allProviders) {
-    for (const locale of locales) {
-      const slug = locale === 'zh' ? p.slug_zh : p.slug_en;
-      const lastmod = p.updated_at.split(' ')[0];
+    const languages = providerLanguages.get(p.id);
+    const availableLocales = locales.filter((locale) => languages?.has(locale));
+    if (availableLocales.length === 0) continue;
+
+    const slugFor = (locale: (typeof locales)[number]) => (
+      locale === 'zh' ? p.slug_zh : p.slug_en
+    );
+    const xDefaultLocale = availableLocales.includes('zh') ? 'zh' : availableLocales[0];
+    const hreflangs = [
+      ...availableLocales.map((locale) => (
+        `    <xhtml:link rel="alternate" hreflang="${locale}" href="${baseUrl}/${locale}/provider/${escapeXml(slugFor(locale))}/" />`
+      )),
+      `    <xhtml:link rel="alternate" hreflang="x-default" href="${baseUrl}/${xDefaultLocale}/provider/${escapeXml(slugFor(xDefaultLocale))}/" />`,
+    ].join('\n');
+
+    for (const locale of availableLocales) {
       urls.push(`  <url>
-    <loc>${baseUrl}/${locale}/provider/${escapeXml(slug)}/</loc>
-    <lastmod>${lastmod}</lastmod>
+    <loc>${baseUrl}/${locale}/provider/${escapeXml(slugFor(locale))}/</loc>
+    <lastmod>${p.updated_at.split(' ')[0]}</lastmod>
     <changefreq>weekly</changefreq>
     <priority>0.8</priority>
-    <xhtml:link rel="alternate" hreflang="zh" href="${baseUrl}/zh/provider/${escapeXml(p.slug_zh)}/" />
-    <xhtml:link rel="alternate" hreflang="en" href="${baseUrl}/en/provider/${escapeXml(p.slug_en)}/" />
+${hreflangs}
   </url>`);
     }
   }
@@ -112,39 +142,49 @@ ${hreflangs}
   const allActivities = await db
     .select({
       id: activities.id,
-      slug: activities.slug,
       is_active: activities.is_active,
       published_at: activities.published_at,
     })
     .from(activities)
     .where(eq(activities.is_active, true));
 
+  // 一次性取回所有语言 slug，避免为每个活动执行两次查询
+  const activityContentRows = await db
+    .select({
+      activity_id: activitiesContent.activity_id,
+      lang: activitiesContent.lang,
+      slug: activitiesContent.slug,
+    })
+    .from(activitiesContent)
+    .where(inArray(activitiesContent.lang, [...locales]));
+  const localizedActivitySlugs = new Map<number, Map<string, string>>();
+  for (const row of activityContentRows) {
+    if (!localizedActivitySlugs.has(row.activity_id)) {
+      localizedActivitySlugs.set(row.activity_id, new Map());
+    }
+    localizedActivitySlugs.get(row.activity_id)!.set(row.lang, row.slug);
+  }
+
   for (const a of allActivities) {
-    // 获取各语言的 slug
-    const zhContent = await db
-      .select({ slug: activitiesContent.slug })
-      .from(activitiesContent)
-      .where(and(eq(activitiesContent.activity_id, a.id), eq(activitiesContent.lang, 'zh')))
-      .get();
-    const enContent = await db
-      .select({ slug: activitiesContent.slug })
-      .from(activitiesContent)
-      .where(and(eq(activitiesContent.activity_id, a.id), eq(activitiesContent.lang, 'en')))
-      .get();
+    const slugs = localizedActivitySlugs.get(a.id);
+    const availableLocales = locales.filter((locale) => slugs?.has(locale));
+    if (availableLocales.length === 0 || !slugs) continue;
 
-    const zhSlug = zhContent?.slug || a.slug;
-    const enSlug = enContent?.slug || a.slug;
-    const lastmod = a.published_at.split(' ')[0];
+    const xDefaultLocale = availableLocales.includes('zh') ? 'zh' : availableLocales[0];
+    const hreflangs = [
+      ...availableLocales.map((locale) => (
+        `    <xhtml:link rel="alternate" hreflang="${locale}" href="${baseUrl}/${locale}/activity/${escapeXml(slugs.get(locale)!)}/" />`
+      )),
+      `    <xhtml:link rel="alternate" hreflang="x-default" href="${baseUrl}/${xDefaultLocale}/activity/${escapeXml(slugs.get(xDefaultLocale)!)}/" />`,
+    ].join('\n');
 
-    for (const locale of locales) {
-      const slug = locale === 'zh' ? zhSlug : enSlug;
+    for (const locale of availableLocales) {
       urls.push(`  <url>
-    <loc>${baseUrl}/${locale}/activity/${escapeXml(slug)}/</loc>
-    <lastmod>${lastmod}</lastmod>
+    <loc>${baseUrl}/${locale}/activity/${escapeXml(slugs.get(locale)!)}/</loc>
+    <lastmod>${a.published_at.split(' ')[0]}</lastmod>
     <changefreq>weekly</changefreq>
     <priority>0.7</priority>
-    <xhtml:link rel="alternate" hreflang="zh" href="${baseUrl}/zh/activity/${escapeXml(zhSlug)}/" />
-    <xhtml:link rel="alternate" hreflang="en" href="${baseUrl}/en/activity/${escapeXml(enSlug)}/" />
+${hreflangs}
   </url>`);
     }
   }

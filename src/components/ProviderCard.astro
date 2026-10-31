@@ -24,53 +24,65 @@ interface Props {
 
 const { provider, content, lang } = Astro.props;
 const slug = lang === 'zh' ? provider.slug_zh : provider.slug_en;
-const logoUrl = getLogoUrl(provider.logo_key, provider.updated_at);
 const descText = richTextToPlainText(content.desc);
 
-// Parse tags JSON (supports both old flat array and new bilingual format)
 const rawTags = parseStoredTags(provider.tags);
-const tags = rawTags.map(tag => {
-  if (typeof tag === 'string') return tag;
-  return tag[lang] || tag.zh || tag.en || '';
-});
+const tags = rawTags
+  .map((tag) => {
+    if (typeof tag === 'string') return tag;
+    return tag[lang] || tag.zh || tag.en || '';
+  })
+  .filter(Boolean);
+
+const ratingText = provider.rating != null && provider.rating > 0 ? provider.rating.toFixed(1) : '—';
+const updated = provider.updated_at.slice(0, 10);
+const categoryLabel = t(lang, `categories.${provider.category}`);
+const logoUrl = provider.logo_key ? getLogoUrl(provider.logo_key, provider.updated_at) : null;
+const logoInitial = content.name.trim().charAt(0).toUpperCase() || '·';
 ---
 
-<a
-  href={`/${lang}/provider/${slug}/`}
-  class="provider-card block"
->
-  <div class="flex items-start gap-4">
-    <img
-      src={logoUrl}
-      alt={content.name}
-      class="provider-logo w-12 h-12 rounded-lg object-contain flex-shrink-0"
-      loading="lazy"
-      width="48"
-      height="48"
-    />
-    <div class="flex-1 min-w-0">
-      <h3 class="font-semibold text-gray-900 truncate tracking-tight">{content.name}</h3>
-      <span class="inline-block text-xs px-2 py-0.5 bg-gray-100 text-gray-600 rounded mt-1">
-        {t(lang, `categories.${provider.category}`)}
-      </span>
-      {tags.length > 0 && (
-        <div class="flex flex-wrap gap-1 mt-2">
-          {tags.map((tag) => (
-            <span class="inline-block text-xs px-2 py-0.5 tag-chip rounded-full">
-              {tag}
-            </span>
-          ))}
-        </div>
-      )}
-      {descText && <p class="text-sm text-gray-500 mt-2 line-clamp-2">{descText}</p>}
+<article class="card">
+  <div class="card-top">
+    {logoUrl ? (
+      <img
+        src={logoUrl}
+        alt=""
+        class="card-logo"
+        loading="lazy"
+        width="40"
+        height="40"
+      />
+    ) : (
+      <span class="card-logo card-logo-fallback" aria-hidden="true">{logoInitial}</span>
+    )}
+    <div class="card-heading">
+      <span class="card-eyebrow">{categoryLabel}</span>
+      <h3 class="card-title">
+        <a href={`/${lang}/provider/${slug}/`} class="stretched-link">{content.name}</a>
+      </h3>
     </div>
   </div>
-  <div class="provider-card-footer">
-    <span class="provider-rating">
-      {provider.rating != null && provider.rating > 0 ? (
-        <><span aria-hidden="true">★</span> {provider.rating.toFixed(1)}</>
-      ) : (lang === 'zh' ? '服务商资料' : 'Provider profile')}
+
+  {descText && <p class="card-desc">{descText}</p>}
+
+  {tags.length > 0 && (
+    <div class="card-tags">
+      {tags.map((tag) => <span class="chip">{tag}</span>)}
+    </div>
+  )}
+
+  <div class="card-metrics">
+    <span class="card-metric-value">
+      {ratingText}{ratingText !== '—' && <span class="card-metric-scale"> / 5</span>}
     </span>
-    <span class="provider-card-action">{lang === 'zh' ? '查看详情' : 'View details'} <span aria-hidden="true">→</span></span>
+    <span class="card-metric-label">{t(lang, 'home.editorial')}</span>
   </div>
-</a>
+
+  <div class="card-footer">
+    <span class="card-fact">{t(lang, 'common.updated')} {updated}</span>
+    <span class="card-cta">
+      {t(lang, 'home.viewDetails')}
+      <span class="card-arrow" aria-hidden="true">→</span>
+    </span>
+  </div>
+</article>

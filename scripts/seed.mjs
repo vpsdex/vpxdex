@@ -1,30 +1,11 @@
 /**
- * Seed script: Creates the admin user and sample providers in local D1.
+ * Seed script: Creates sample providers in local D1.
  * Run after migrations: node scripts/seed.mjs
  */
 import { getPlatformProxy } from 'wrangler';
 
-async function hashPassword(password) {
-  const encoder = new TextEncoder();
-  const salt = crypto.getRandomValues(new Uint8Array(16));
-  const keyMaterial = await crypto.subtle.importKey('raw', encoder.encode(password), 'PBKDF2', false, ['deriveBits']);
-  const hash = await crypto.subtle.deriveBits(
-    { name: 'PBKDF2', salt, iterations: 100_000, hash: 'SHA-256' },
-    keyMaterial,
-    256,
-  );
-  const toHex = (bytes) => Array.from(bytes).map((b) => b.toString(16).padStart(2, '0')).join('');
-  return `${toHex(salt)}:${toHex(new Uint8Array(hash))}`;
-}
-
 async function main() {
   const { env, dispose } = await getPlatformProxy();
-
-  console.log('[seed] Creating admin user...');
-  const passwordHash = await hashPassword('admin123');
-  await env.DB.prepare('INSERT OR IGNORE INTO users (username, password_hash) VALUES (?, ?)')
-    .bind('admin', passwordHash)
-    .run();
 
   console.log('[seed] Creating sample providers...');
   const sampleProviders = [

@@ -1,7 +1,7 @@
 ---
 import BaseLayout from '../../layouts/BaseLayout.astro';
 import ProviderCard from '../../components/ProviderCard.astro';
-import { isValidLocale, defaultLocale, locales, type Locale } from '../../i18n/config';
+import { isValidLocale, locales, type Locale } from '../../i18n/config';
 import { t } from '../../i18n/utils';
 import { getDb } from '../../lib/db';
 import { getCached, setCache } from '../../lib/cache';
@@ -9,6 +9,7 @@ import { providers, providersContent } from '../../db/schema';
 import { eq, and, desc } from 'drizzle-orm';
 import { env } from 'cloudflare:workers';
 import { richTextToPlainText } from '../../lib/rich-text';
+import { getLogoUrl } from '../../lib/r2';
 import { isProviderCategory, providerCategories } from '../../lib/provider-categories';
 
 const lang = Astro.params.lang as string;
@@ -48,9 +49,18 @@ if (!data) {
 // at render time so "latest six" remains correct until those KV entries expire.
 data.sort((left, right) => right.providers.id - left.providers.id);
 
+// Legacy rows may lack a translation for this locale; never link to a page
+// that would 404.
+type LocalizedProviderRow = ProviderRow & {
+  providers_content: NonNullable<ProviderRow['providers_content']>;
+};
+const localizedData = data.filter(
+  (row): row is LocalizedProviderRow => row.providers_content !== null,
+);
+
 // Group by category
-const categories = new Map<string, ProviderRow[]>();
-for (const row of data) {
+const categories = new Map<string, LocalizedProviderRow[]>();
+for (const row of localizedData) {
   const cat = row.providers.category;
   if (!categories.has(cat)) categories.set(cat, []);
   categories.get(cat)!.push(row);
@@ -63,28 +73,52 @@ const categoryEntries = Array.from(categories.entries()).sort(([left], [right]) 
 const siteUrl = Astro.site!.href.replace(/\/$/, '');
 const alternates = locales.map((l) => ({ lang: l, href: `${siteUrl}/${l}/` }));
 
-// Prepare data for client-side search
+// Prepare data for client-side search. Only send fields the client actually
+// renders so the inline payload stays small as the directory grows.
 const providerSearchData = categoryEntries.flatMap(([cat, items]) =>
   items.map(item => ({
-    ...item,
     category: cat,
+    providers: {
+      slug_zh: item.providers.slug_zh,
+      slug_en: item.providers.slug_en,
+      logo_url: item.providers.logo_key
+        ? getLogoUrl(item.providers.logo_key, item.providers.updated_at)
+        : null,
+      rating: item.providers.rating,
+      tags: item.providers.tags,
+      updated_at: item.providers.updated_at,
+    },
     providers_content: item.providers_content
       ? {
-          ...item.providers_content,
-          desc: richTextToPlainText(item.providers_content.desc),
+          name: item.providers_content.name,
+          desc: richTextToPlainText(item.providers_content.desc).slice(0, 300),
         }
       : null,
   })));
 const homepageProviderData = categoryEntries.flatMap(([, items]) => items.slice(0, 6));
 
-const allTags = new Set<string>();
-for (const row of data) {
+const pad = (value: number) => String(value).padStart(2, '0');
+const totalProviders = localizedData.length;
+const totalCategories = categories.size;
+const lastReviewed = localizedData.reduce(
+  (latest, row) => (row.providers.updated_at > latest ? row.providers.updated_at : latest),
+  '',
+).slice(0, 10);
+
+// Tags may be stored as plain strings or bilingual objects. Collect both
+// language labels so the curated filters appear on /zh/ and /en/ alike.
+const allTagKeys = new Set<string>();
+for (const row of localizedData) {
   if (!row.providers.tags) continue;
   try {
     const parsed = JSON.parse(row.providers.tags);
     for (const tag of parsed) {
-      const label = typeof tag === 'string' ? tag : tag[lang] || tag.zh || tag.en;
-      if (label) allTags.add(label);
+      if (typeof tag === 'string') {
+        if (tag) allTagKeys.add(tag);
+        continue;
+      }
+      if (tag.zh) allTagKeys.add(tag.zh);
+      if (tag.en) allTagKeys.add(tag.en);
     }
   } catch {
     // Ignore malformed legacy tag JSON rather than breaking the homepage.
@@ -104,7 +138,9 @@ const selectedTagDefinitions = [
   { value: 'NVMe', zh: 'NVMe', en: 'NVMe' },
   { value: 'Windows', zh: 'Windows', en: 'Windows' },
 ] as const;
-const homepageTags = selectedTagDefinitions.filter((tag) => allTags.has(tag.value));
+const homepageTags = selectedTagDefinitions.filter(
+  (tag) => allTagKeys.has(tag.zh) || allTagKeys.has(tag.en),
+);
 
 const homeJsonLd = {
   '@context': 'https://schema.org',
@@ -130,7 +166,7 @@ const orgJsonLd = {
 const itemListJsonLd = {
   '@context': 'https://schema.org',
   '@type': 'ItemList',
-  name: lang === 'zh' ? 'VPSDEX 收录服务商' : 'VPSDEX listed providers',
+  name: t(lang as Locale, 'home.listedName'),
   numberOfItems: homepageProviderData.length,
   itemListElement: homepageProviderData.map((item, index) => {
     const slug = lang === 'zh' ? item.providers.slug_zh : item.providers.slug_en;
@@ -138,7 +174,7 @@ const itemListJsonLd = {
       '@type': 'ListItem',
       position: index + 1,
       url: `${siteUrl}/${lang}/provider/${slug}/`,
-      name: item.providers_content?.name || slug,
+      name: item.providers_content.name,
     };
   }),
 };
@@ -152,86 +188,109 @@ const itemListJsonLd = {
   jsonLd={homeJsonLd}
   extraJsonLd={[orgJsonLd, itemListJsonLd]}
 >
-  <section class="home-hero">
-    <p class="eyebrow">{lang === 'zh' ? '服务商目录' : 'Provider directory'}</p>
-    <h1 class="hero-title">{lang === 'zh' ? '找到适合业务长期使用的云服务' : 'Cloud services selected for serious business'}</h1>
-    <p class="hero-copy">{t(lang, 'site.description')}</p>
-
-  <!-- Search Bar -->
-  <div class="search-panel">
-    <div class="search-actions flex gap-2">
-      <div class="search-field relative flex-1">
-        <input
-          type="text"
-          id="search-input"
-          placeholder={lang === 'zh' ? '搜索服务商、产品或标签' : 'Search providers, products or tags'}
-          class="search-input text-sm"
+  <section class="hero">
+    <div class="hero-grid">
+      <div>
+        <p class="eyebrow">{t(lang, 'home.eyebrow')}</p>
+        <h1 class="hero-title">
+          {t(lang, 'home.title')}
+        </h1>
+        <p
+          class="hero-copy"
+          set:html={t(lang, 'home.heroCopy', {
+            providers: `<span class="mono">${totalProviders}</span>`,
+            categories: `<span class="mono">${totalCategories}</span>`,
+          })}
         />
-        <svg class="absolute left-4 top-3.5 h-5 w-5 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
-        </svg>
-      </div>
-      <button
-        id="search-button"
-        class="search-button transition-colors flex items-center gap-2"
-      >
-        <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
-        </svg>
-        {lang === 'zh' ? '搜索' : 'Search'}
-      </button>
-      <button
-        id="clear-button"
-        class="clear-button transition-colors"
-      >
-        {lang === 'zh' ? '清除' : 'Clear'}
-      </button>
-    </div>
-    <div id="search-tags" class="mt-3 flex flex-wrap gap-2">
-      {homepageTags.map((tag) => (
-        <button
-          type="button"
-          class="text-xs px-3 py-1 tag-chip-btn rounded-full transition-colors"
-          data-tag={tag.value}
-        >
-          {tag[lang]}
-        </button>
-      ))}
-    </div>
-  </div>
-  </section>
 
-  <div id="provider-container">
-    {categories.size === 0 && (
-      <p class="text-gray-500 text-center py-12">{t(lang, 'admin.noProviders')}</p>
-    )}
+        <div class="hero-actions">
+          <a class="btn" href="#directory">{t(lang, 'home.browse')}</a>
+          <a class="text-link" href={`/${lang}/methodology/`}>
+            {t(lang, 'common.method')} →
+          </a>
+        </div>
 
-  {categoryEntries.map(([category, items]) => (
-    <section class="mb-12">
-      <div class="category-heading">
-        <h2 class="text-xl font-semibold text-gray-800">{t(lang, `categories.${category}`)}</h2>
-        <div class="flex items-center gap-3">
-          <span class="category-count">{items.length} {lang === 'zh' ? '家服务商' : 'providers'}</span>
-          {isProviderCategory(category) && (
-            <a href={`/${lang}/category/${category}/`} class="view-all-link">
-              {lang === 'zh' ? '查看全部' : 'View all'} →
-            </a>
-          )}
+        <div class="directory-search">
+          <div class="search-row">
+            <label class="sr-only" for="search-input">
+              {t(lang, 'home.searchLabel')}
+            </label>
+            <input
+              type="text"
+              id="search-input"
+              placeholder={t(lang, 'home.searchLabel')}
+              class="input"
+            />
+            <button id="search-button" type="button" class="btn">
+              {t(lang, 'home.search')}
+            </button>
+            <button id="clear-button" type="button" class="search-clear">
+              {t(lang, 'home.clear')}
+            </button>
+          </div>
+          <div id="search-tags" class="filter-tags">
+            {homepageTags.map((tag) => (
+              <button
+                type="button"
+                class="tag-btn"
+                data-tag={tag.value}
+                aria-pressed="false"
+              >
+                {tag[lang]}
+              </button>
+            ))}
+          </div>
         </div>
       </div>
-      <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-        {items.slice(0, 6).map((row) => (
-          <ProviderCard
-            provider={row.providers}
-            content={
-              row.providers_content || { name: row.providers.slug_en, desc: null }
-            }
-            lang={lang as Locale}
-          />
-        ))}
+
+      <div class="hero-facts" aria-label={t(lang, 'home.factsAria')}>
+        <div class="fact-row">
+          <span class="fact-label">{t(lang, 'home.providersFact')}</span>
+          <span class="fact-value">{pad(totalProviders)}</span>
+        </div>
+        <div class="fact-row">
+          <span class="fact-label">{t(lang, 'home.categoriesFact')}</span>
+          <span class="fact-value">{pad(totalCategories)}</span>
+        </div>
+        <div class="fact-row">
+          <span class="fact-label">{t(lang, 'home.lastReviewed')}</span>
+          <span class="fact-value">{lastReviewed || '—'}</span>
+        </div>
       </div>
-    </section>
-  ))}
+    </div>
+  </section>
+
+  <div id="directory">
+    <div id="provider-container">
+      {categories.size === 0 && (
+        <p class="empty-state">{t(lang, 'home.empty')}</p>
+      )}
+
+      {categoryEntries.map(([category, items]) => (
+        <section class="section-gap">
+          <div class="section-head">
+            <h2 class="section-title">{t(lang, `categories.${category}`)}</h2>
+            <div class="section-side">
+              <span class="section-count">{pad(Math.min(items.length, 6))} / {pad(items.length)}</span>
+              {isProviderCategory(category) && (
+                <a href={`/${lang}/category/${category}/`} class="section-link">
+                  {t(lang, 'home.viewAll')} →
+                </a>
+              )}
+            </div>
+          </div>
+          <div class="hair-grid">
+            {items.slice(0, 6).map((row) => (
+              <ProviderCard
+                provider={row.providers}
+                content={row.providers_content}
+                lang={lang as Locale}
+              />
+            ))}
+          </div>
+        </section>
+      ))}
+    </div>
   </div>
 
   <script define:vars={{
@@ -239,20 +298,29 @@ const itemListJsonLd = {
     lang,
     categoryLabels: JSON.stringify(Object.fromEntries(providerCategories.map((category) => [category, t(lang, `categories.${category}`)]))),
     categoryPaths: JSON.stringify(Object.fromEntries(providerCategories.map((category) => [category, `/${lang}/category/${category}/`]))),
-    viewAllLabel: lang === 'zh' ? '查看全部' : 'View all',
-    emptyLabel: lang === 'zh' ? '没有找到匹配的服务商' : 'No matching providers found',
+    tagFilters: JSON.stringify(Object.fromEntries(selectedTagDefinitions.map((tag) => [tag.value, [tag.zh, tag.en]]))),
+    viewAllLabel: t(lang, 'home.viewAll'),
+    emptyLabel: t(lang, 'home.noMatch'),
+    emptyHintLabel: t(lang, 'home.noMatchHint'),
+    clearFiltersLabel: t(lang, 'home.clearFilters'),
+    uiLabelsJson: JSON.stringify({
+      editorial: t(lang, 'home.editorial'),
+      updated: t(lang, 'common.updated'),
+      viewDetails: t(lang, 'home.viewDetails'),
+    }),
   }}>
     const allProviders = JSON.parse(data);
     const localizedCategoryLabels = JSON.parse(categoryLabels);
     const localizedCategoryPaths = JSON.parse(categoryPaths);
+    const localizedTagFilters = JSON.parse(tagFilters);
+    const uiLabels = JSON.parse(uiLabelsJson);
+
     const searchInput = document.getElementById('search-input');
     const searchButton = document.getElementById('search-button');
     const clearButton = document.getElementById('clear-button');
     const searchTags = document.getElementById('search-tags');
-
     const providerContainer = document.getElementById('provider-container');
 
-    // Escape HTML to prevent XSS
     function escapeHtml(str) {
       if (str == null) return '';
       return String(str)
@@ -263,37 +331,63 @@ const itemListJsonLd = {
         .replace(/'/g, '&#039;');
     }
 
+    function padNumber(value) {
+      return String(value).padStart(2, '0');
+    }
+
     let currentSearch = '';
     let currentTagFilter = '';
 
     // Helper: parse tags JSON, supports old flat array and new bilingual format
     function parseTags(raw) {
       if (!raw) return [];
-      const parsed = JSON.parse(raw);
-      return parsed.map(tag => {
-        if (typeof tag === 'string') return tag;
-        return tag[lang] || tag.zh || tag.en || '';
-      });
+      try {
+        const parsed = JSON.parse(raw);
+        return parsed
+          .map(tag => {
+            if (typeof tag === 'string') return tag;
+            return tag[lang] || tag.zh || tag.en || '';
+          })
+          .filter(Boolean);
+      } catch {
+        return [];
+      }
+    }
+
+    // Stable keys for filter matching: always prefer the Chinese canonical
+    // label so a filter works regardless of the current UI language.
+    function canonicalTagKeys(raw) {
+      if (!raw) return [];
+      try {
+        const parsed = JSON.parse(raw);
+        return parsed
+          .map(tag => typeof tag === 'string' ? tag : tag.zh || tag.en || '')
+          .filter(Boolean);
+      } catch {
+        return [];
+      }
     }
 
     // Helper: get all tag texts for search matching (both languages)
     function allTagTexts(raw) {
       if (!raw) return [];
-      const parsed = JSON.parse(raw);
-      return parsed.flatMap(tag => {
-        if (typeof tag === 'string') return [tag];
-        return [tag.zh, tag.en].filter(Boolean);
-      });
+      try {
+        const parsed = JSON.parse(raw);
+        return parsed.flatMap(tag => {
+          if (typeof tag === 'string') return [tag];
+          return [tag.zh, tag.en].filter(Boolean);
+        });
+      } catch {
+        return [];
+      }
     }
 
-    // Search button click
     searchButton.addEventListener('click', function(e) {
       e.preventDefault();
       currentSearch = searchInput.value.toLowerCase().trim();
       filterProviders();
     });
 
-    // Enter key in search input
     searchInput.addEventListener('keypress', function(e) {
       if (e.key === 'Enter') {
         e.preventDefault();
@@ -301,20 +395,31 @@ const itemListJsonLd = {
       }
     });
 
-    // Clear button click
-    clearButton.addEventListener('click', function(e) {
-      e.preventDefault();
+    function clearFilters() {
       searchInput.value = '';
       currentSearch = '';
       currentTagFilter = '';
 
-      // Reset all tag buttons
       const tagButtons = searchTags.querySelectorAll('[data-tag]');
       tagButtons.forEach(button => {
         button.classList.remove('is-active');
+        button.setAttribute('aria-pressed', 'false');
       });
 
       filterProviders();
+      searchInput.focus();
+    }
+
+    clearButton.addEventListener('click', function(e) {
+      e.preventDefault();
+      clearFilters();
+    });
+
+    providerContainer.addEventListener('click', function(e) {
+      if (e.target.closest('[data-clear-filters]')) {
+        e.preventDefault();
+        clearFilters();
+      }
     });
 
     function filterProviders() {
@@ -328,13 +433,14 @@ const itemListJsonLd = {
         const name = content?.name?.toLowerCase() || '';
         const desc = content?.desc?.toLowerCase() || '';
         const tagsForSearch = allTagTexts(provider.providers.tags);
-        const tagsForDisplay = parseTags(provider.providers.tags);
+        const tagKeys = canonicalTagKeys(provider.providers.tags);
+        const filterKeys = localizedTagFilters[currentTagFilter] || [currentTagFilter];
 
         const matchesSearch = name.includes(currentSearch) ||
                             desc.includes(currentSearch) ||
                             tagsForSearch.some(tag => tag.toLowerCase().includes(currentSearch));
 
-        const matchesTag = !currentTagFilter || tagsForDisplay.includes(currentTagFilter);
+        const matchesTag = !currentTagFilter || filterKeys.some(key => tagKeys.includes(key));
 
         return matchesSearch && matchesTag;
       });
@@ -343,7 +449,6 @@ const itemListJsonLd = {
     }
 
     function renderProviders(providers) {
-      // Group by category
       const categories = new Map();
       for (const provider of providers) {
         const cat = provider.category;
@@ -352,7 +457,12 @@ const itemListJsonLd = {
       }
 
       if (categories.size === 0) {
-        providerContainer.innerHTML = `<p class="text-gray-500 text-center py-12">${escapeHtml(emptyLabel)}</p>`;
+        providerContainer.innerHTML = `
+          <div class="empty-state" role="status">
+            <p class="empty-state-title">${escapeHtml(emptyLabel)}</p>
+            <p class="empty-state-hint">${escapeHtml(emptyHintLabel)}</p>
+            <button type="button" class="btn" data-clear-filters>${escapeHtml(clearFiltersLabel)}</button>
+          </div>`;
         return;
       }
 
@@ -361,46 +471,57 @@ const itemListJsonLd = {
         const visibleItems = shouldLimit ? items.slice(0, 6) : items;
         const categoryLabel = localizedCategoryLabels[category] || category;
         const categoryPath = localizedCategoryPaths[category];
+        const count = `${padNumber(visibleItems.length)} / ${padNumber(items.length)}`;
         return `
-        <section class="mb-12">
-          <div class="category-heading">
-            <h2 class="text-xl font-semibold text-gray-800">${escapeHtml(categoryLabel)}</h2>
-            <div class="flex items-center gap-3">
-              <span class="category-count">${items.length} ${lang === 'zh' ? '家服务商' : 'providers'}</span>
-              ${categoryPath ? `<a href="${escapeHtml(categoryPath)}" class="text-sm font-medium text-blue-600 hover:text-gray-900">${escapeHtml(viewAllLabel)} →</a>` : ''}
+        <section class="section-gap">
+          <div class="section-head">
+            <h2 class="section-title">${escapeHtml(categoryLabel)}</h2>
+            <div class="section-side">
+              <span class="section-count">${count}</span>
+              ${categoryPath ? `<a href="${escapeHtml(categoryPath)}" class="section-link">${escapeHtml(viewAllLabel)} →</a>` : ''}
             </div>
           </div>
-          <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+          <div class="hair-grid">
             ${visibleItems.map(row => {
               const content = row.providers_content || { name: row.providers.slug_en, desc: null };
               const tags = parseTags(row.providers.tags);
-              const logoUrl = row.providers.logo_key
-                ? `/api/logo/${escapeHtml(row.providers.logo_key)}`
-                : 'data:image/svg+xml,%3Csvg xmlns=%22http://www.w3.org/2000/svg%22 width=%2248%22 height=%2248%22 viewBox=%220 0 48 48%22%3E%3Crect width=%2248%22 height=%2248%22 rx=%228%22 fill=%22%23eef2f7%22/%3E%3Cpath d=%22M15 15h18v18H15z%22 fill=%22none%22 stroke=%22%2364748b%22 stroke-width=%222%22/%3E%3Cpath d=%22M19 20h10M19 24h10M19 28h6%22 stroke=%22%2364748b%22 stroke-width=%222%22/%3E%3C/svg%3E';
+              const rating = row.providers.rating != null && row.providers.rating > 0
+                ? parseFloat(row.providers.rating).toFixed(1)
+                : '—';
+              const updated = row.providers.updated_at ? String(row.providers.updated_at).slice(0, 10) : '—';
               const slug = lang === 'zh' ? row.providers.slug_zh : row.providers.slug_en;
+              const logoUrl = row.providers.logo_url;
+              const logoInitial = (content.name || '·').trim().charAt(0).toUpperCase() || '·';
 
               return `
-                <a href="/${lang}/provider/${escapeHtml(slug)}/" class="provider-card block">
-                  <div class="flex items-start gap-4">
-                    <img src="${escapeHtml(logoUrl)}" alt="${escapeHtml(content.name)}" class="provider-logo w-12 h-12 rounded-lg object-contain flex-shrink-0" loading="lazy" width="48" height="48" />
-                    <div class="flex-1 min-w-0">
-                      <h3 class="font-semibold text-gray-900 truncate tracking-tight">${escapeHtml(content.name)}</h3>
-                      <span class="inline-block text-xs px-2 py-0.5 bg-gray-100 text-gray-600 rounded mt-1">${escapeHtml(category)}</span>
-                      ${tags.length > 0 ? `
-                        <div class="flex flex-wrap gap-1 mt-2">
-                          ${tags.map(tag => `<span class="inline-block text-xs px-2 py-0.5 tag-chip rounded-full">${escapeHtml(tag)}</span>`).join('')}
-                        </div>
-                      ` : ''}
-                      ${content.desc ? `<p class="text-sm text-gray-500 mt-2 line-clamp-2">${escapeHtml(content.desc)}</p>` : ''}
-                      ${row.providers.rating != null && row.providers.rating > 0 ? `
-                        <div class="flex items-center gap-1 mt-2">
-                          <span class="text-yellow-500 text-sm">&#9733;</span>
-                          <span class="text-sm text-gray-600">${parseFloat(row.providers.rating).toFixed(1)}</span>
-                        </div>
-                      ` : ''}
+                <article class="card">
+                  <div class="card-top">
+                    ${logoUrl
+                      ? `<img src="${escapeHtml(logoUrl)}" alt="" class="card-logo" loading="lazy" width="40" height="40" />`
+                      : `<span class="card-logo card-logo-fallback" aria-hidden="true">${escapeHtml(logoInitial)}</span>`}
+                    <div class="card-heading">
+                      <span class="card-eyebrow">${escapeHtml(categoryLabel)}</span>
+                      <h3 class="card-title">
+                        <a href="/${lang}/provider/${escapeHtml(slug)}/" class="stretched-link">${escapeHtml(content.name)}</a>
+                      </h3>
                     </div>
                   </div>
-                </a>
+                  ${content.desc ? `<p class="card-desc">${escapeHtml(content.desc)}</p>` : ''}
+                  ${tags.length > 0
+                    ? `<div class="card-tags">${tags.map(tag => `<span class="chip">${escapeHtml(tag)}</span>`).join('')}</div>`
+                    : ''}
+                  <div class="card-metrics">
+                    <span class="card-metric-value">${rating}${rating !== '—' ? '<span class="card-metric-scale"> / 5</span>' : ''}</span>
+                    <span class="card-metric-label">${escapeHtml(uiLabels.editorial)}</span>
+                  </div>
+                  <div class="card-footer">
+                    <span class="card-fact">${escapeHtml(uiLabels.updated)} ${updated}</span>
+                    <span class="card-cta">
+                      ${escapeHtml(uiLabels.viewDetails)}
+                      <span class="card-arrow" aria-hidden="true">→</span>
+                    </span>
+                  </div>
+                </article>
               `;
             }).join('')}
           </div>
@@ -415,12 +536,17 @@ const itemListJsonLd = {
         if (tagButton) {
           const tag = tagButton.dataset.tag;
           currentTagFilter = currentTagFilter === tag ? '' : tag;
-          searchTags.querySelectorAll('[data-tag]').forEach(btn => btn.classList.remove('is-active'));
-          if (currentTagFilter) tagButton.classList.add('is-active');
+          searchTags.querySelectorAll('[data-tag]').forEach(btn => {
+            btn.classList.remove('is-active');
+            btn.setAttribute('aria-pressed', 'false');
+          });
+          if (currentTagFilter) {
+            tagButton.classList.add('is-active');
+            tagButton.setAttribute('aria-pressed', 'true');
+          }
           filterProviders();
         }
       });
     }
-
   </script>
 </BaseLayout>

@@ -6,7 +6,7 @@ import { eq, and, desc } from 'drizzle-orm';
 import { sanitizeRichText } from '../../../../lib/rich-text';
 import { requireApiAuth, jsonResponse, handleCors } from '../../../../lib/api-auth';
 import {
-  errorMessage, optionalText, RequestValidationError, requireText, validateDate,
+  assertBilingualContent, errorMessage, optionalText, RequestValidationError, requireText, validateDate,
   validateBoolean, validateLocale, validatePositiveInteger, validateSlug,
 } from '../../../../lib/validation';
 
@@ -95,6 +95,7 @@ export const POST: APIRoute = async ({ request }) => {
     if (new Set(normalizedContents.map((content) => content.lang)).size !== normalizedContents.length) {
       return jsonResponse({ error: 'contents contains duplicate languages' }, 400);
     }
+    assertBilingualContent(normalizedContents.map((content) => content.lang));
 
     const db = getDb(env.DB);
 

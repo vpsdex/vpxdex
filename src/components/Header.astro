@@ -11,92 +11,19 @@ interface Props {
 
 const { lang, alternates } = Astro.props;
 const currentPath = Astro.url.pathname;
+const menuLabel = t(lang, 'header.menuOpen');
+const closeLabel = t(lang, 'header.menuClose');
 ---
 
-<header class="site-nav border-b sticky top-0 z-50">
-  <div class="site-shell mx-auto px-5 sm:px-6 py-3">
-    <nav class="flex items-center justify-between gap-4">
-      <a href={`/${lang}/`} class="nav-brand shrink-0 flex items-center gap-2.5 text-base font-bold transition-colors" aria-label={t(lang, 'site.brand')}>
-        <span class="brand-mark" aria-hidden="true">V</span>
-        <span>{t(lang, 'site.brand')}</span>
-      </a>
-      <div class="site-nav-links hidden min-w-0 items-center gap-1 overflow-x-auto md:flex">
-        <a href={`/${lang}/`} aria-current={currentPath === `/${lang}/` ? 'page' : undefined} class:list={["nav-link shrink-0 whitespace-nowrap text-sm transition-colors", { "is-active": currentPath === `/${lang}/` }] }>
-          {t(lang, 'nav.home')}
-        </a>
-        {primaryProviderCategories.map((category) => {
-          const href = `/${lang}/category/${category}/`;
-          return (
-            <a
-              href={href}
-              aria-current={currentPath === href ? 'page' : undefined}
-              class:list={["nav-link shrink-0 whitespace-nowrap text-sm transition-colors", { "is-active": currentPath === href }]}
-            >
-              {t(lang, `categories.${category}`)}
-            </a>
-          );
-        })}
-        <a href={`/${lang}/activities/`} aria-current={currentPath.startsWith(`/${lang}/activit`) ? 'page' : undefined} class:list={["nav-link shrink-0 whitespace-nowrap text-sm transition-colors", { "is-active": currentPath.startsWith(`/${lang}/activit`) }]}>
-          {t(lang, 'nav.activities')}
-        </a>
-        <LanguageSwitcher lang={lang} alternates={alternates} />
-      </div>
+<header class="site-header">
+  <div class="container header-inner">
+    <a href={`/${lang}/`} class="brand" aria-label={t(lang, 'site.brand')}>
+      <span class="brand-mark" aria-hidden="true">V</span>
+      <span>{t(lang, 'site.brand')}</span>
+    </a>
 
-      <div class="flex items-center gap-2 md:hidden">
-        <LanguageSwitcher lang={lang} alternates={alternates} />
-        <button
-          type="button"
-          class="mobile-menu-toggle"
-          aria-label={lang === 'zh' ? '打开导航菜单' : 'Open navigation menu'}
-          aria-controls="mobile-site-menu"
-          aria-expanded="false"
-          data-mobile-menu-toggle
-        >
-          <span class="sr-only">{lang === 'zh' ? '打开导航菜单' : 'Open navigation menu'}</span>
-          <span aria-hidden="true" class="mobile-menu-toggle-lines">
-            <span></span>
-            <span></span>
-            <span></span>
-          </span>
-        </button>
-      </div>
-    </nav>
-  </div>
-</header>
-
-<button
-  type="button"
-  class="mobile-menu-backdrop md:hidden"
-  aria-label={lang === 'zh' ? '关闭导航菜单' : 'Close navigation menu'}
-  tabindex="-1"
-  data-mobile-menu-backdrop
-></button>
-
-<aside
-  id="mobile-site-menu"
-  class="mobile-menu-drawer md:hidden"
-  aria-hidden="true"
-  aria-label={lang === 'zh' ? '移动端导航' : 'Mobile navigation'}
-  inert
-  data-mobile-menu-drawer
->
-    <div class="mobile-menu-header">
-      <div>
-        <p class="mobile-menu-eyebrow">{lang === 'zh' ? '导航菜单' : 'Navigation'}</p>
-        <p class="mobile-menu-title">{t(lang, 'site.brand')}</p>
-      </div>
-      <button
-        type="button"
-        class="mobile-menu-close"
-        aria-label={lang === 'zh' ? '关闭导航菜单' : 'Close navigation menu'}
-        data-mobile-menu-close
-      >
-        <span aria-hidden="true">&times;</span>
-      </button>
-    </div>
-
-    <div class="mobile-menu-links">
-      <a href={`/${lang}/`} aria-current={currentPath === `/${lang}/` ? 'page' : undefined} class:list={["mobile-nav-link", { "is-active": currentPath === `/${lang}/` }] }>
+    <nav class="nav-links" aria-label={t(lang, 'nav.primary')}>
+      <a href={`/${lang}/`} aria-current={currentPath === `/${lang}/` ? 'page' : undefined} class:list={["nav-link", { "is-active": currentPath === `/${lang}/` }]}>
         {t(lang, 'nav.home')}
       </a>
       {primaryProviderCategories.map((category) => {
@@ -105,20 +32,94 @@ const currentPath = Astro.url.pathname;
           <a
             href={href}
             aria-current={currentPath === href ? 'page' : undefined}
-            class:list={["mobile-nav-link", { "is-active": currentPath === href }]}
+            class:list={["nav-link", { "is-active": currentPath === href }]}
           >
             {t(lang, `categories.${category}`)}
           </a>
         );
       })}
-      <a href={`/${lang}/activities/`} aria-current={currentPath.startsWith(`/${lang}/activit`) ? 'page' : undefined} class:list={["mobile-nav-link", { "is-active": currentPath.startsWith(`/${lang}/activit`) }]}>
+      <a href={`/${lang}/activities/`} aria-current={currentPath.startsWith(`/${lang}/activit`) ? 'page' : undefined} class:list={["nav-link", { "is-active": currentPath.startsWith(`/${lang}/activit`) }]}>
         {t(lang, 'nav.activities')}
       </a>
-    </div>
+      <LanguageSwitcher lang={lang} alternates={alternates} />
+    </nav>
 
-    <p class="mobile-menu-note">
-      {lang === 'zh' ? '查找、比较并了解可靠的数字基础设施服务商。' : 'Discover and compare trusted digital infrastructure providers.'}
-    </p>
+    <div class="mobile-actions">
+      <LanguageSwitcher lang={lang} alternates={alternates} />
+      <button
+        type="button"
+        class="mobile-menu-toggle"
+        aria-label={menuLabel}
+        aria-controls="mobile-site-menu"
+        aria-expanded="false"
+        data-mobile-menu-toggle
+      >
+        <span class="sr-only">{menuLabel}</span>
+        <span aria-hidden="true" class="mobile-menu-toggle-lines">
+          <span></span>
+          <span></span>
+          <span></span>
+        </span>
+      </button>
+    </div>
+  </div>
+</header>
+
+<button
+  type="button"
+  class="mobile-menu-backdrop"
+  aria-label={closeLabel}
+  tabindex="-1"
+  data-mobile-menu-backdrop
+></button>
+
+<aside
+  id="mobile-site-menu"
+  class="mobile-menu-drawer"
+  aria-hidden="true"
+  aria-label={t(lang, 'nav.mobile')}
+  inert
+  data-mobile-menu-drawer
+>
+  <div class="mobile-menu-header">
+    <div>
+      <p class="mobile-menu-eyebrow">{t(lang, 'nav.navigation')}</p>
+      <p class="mobile-menu-title">{t(lang, 'site.brand')}</p>
+    </div>
+    <button
+      type="button"
+      class="mobile-menu-close"
+      aria-label={closeLabel}
+      data-mobile-menu-close
+    >
+      <span aria-hidden="true">&times;</span>
+    </button>
+  </div>
+
+  <div class="mobile-menu-links">
+    <a href={`/${lang}/`} aria-current={currentPath === `/${lang}/` ? 'page' : undefined} class:list={["mobile-nav-link", { "is-active": currentPath === `/${lang}/` }]}>
+      {t(lang, 'nav.home')}
+    </a>
+    {primaryProviderCategories.map((category) => {
+      const href = `/${lang}/category/${category}/`;
+      return (
+        <a
+          href={href}
+          aria-current={currentPath === href ? 'page' : undefined}
+          class:list={["mobile-nav-link", { "is-active": currentPath === href }]}
+        >
+          {t(lang, `categories.${category}`)}
+        </a>
+      );
+    })}
+    <a href={`/${lang}/activities/`} aria-current={currentPath.startsWith(`/${lang}/activit`) ? 'page' : undefined} class:list={["mobile-nav-link", { "is-active": currentPath.startsWith(`/${lang}/activit`) }]}>
+      {t(lang, 'nav.activities')}
+    </a>
+  </div>
+
+  <p class="mobile-menu-note">
+    {t(lang, 'header.note')}
+  </p>
 </aside>
 
 <script>
@@ -176,7 +177,7 @@ const currentPath = Astro.url.pathname;
     }
   });
 
-  window.matchMedia('(min-width: 768px)').addEventListener('change', (event) => {
+  window.matchMedia('(min-width: 960px)').addEventListener('change', (event) => {
     if (event.matches && menuDrawer?.getAttribute('aria-hidden') === 'false') setMenuOpen(false);
   });
 </script>

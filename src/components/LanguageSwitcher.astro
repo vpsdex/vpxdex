@@ -1,6 +1,6 @@
 ---
-import { locales, type Locale } from '../i18n/config';
-import { getAlternateUrl } from '../i18n/utils';
+import { locales, localeMeta, type Locale } from '../i18n/config';
+import { getAlternateUrl, t } from '../i18n/utils';
 
 interface Props {
   lang: Locale;
@@ -8,20 +8,24 @@ interface Props {
 }
 
 const { lang, alternates } = Astro.props;
-const labels: Record<string, string> = { zh: '中文', en: 'EN' };
 const alternateMap = new Map(alternates?.map((item) => [item.lang, item.href]) || []);
+// When a page reports its real translations, hide languages that do not exist
+// instead of linking to a 404.
+const availableLocales = alternates
+  ? locales.filter((locale) => alternateMap.has(locale))
+  : locales;
 ---
 
-<div class="flex items-center gap-1">
-  {locales.map((locale) => (
+<div class="lang-switch" role="group" aria-label={t(lang, 'common.language')}>
+  {availableLocales.map((locale) => (
     <a
       href={alternateMap.get(locale) || getAlternateUrl(Astro.url, locale)}
-      class:list={[
-        'nav-pill text-sm px-2 py-1 rounded transition-colors',
-        locale === lang && 'is-current',
-      ]}
+      class:list={['lang-link', locale === lang && 'is-current']}
+      hreflang={locale}
+      aria-label={localeMeta[locale].switchLabel}
+      aria-current={locale === lang ? 'true' : undefined}
     >
-      {labels[locale]}
+      {localeMeta[locale].label}
     </a>
   ))}
 </div>

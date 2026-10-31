@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import { validateImageFile } from '../src/lib/image-upload.ts';
 import {
+  assertBilingualContent,
   parseStoredTags,
   serializeTags,
   validateHttpUrl,
@@ -22,6 +23,14 @@ test('tags are normalized and malformed stored data fails closed', () => {
   assert.equal(serializeTags('["NVMe", {"zh":"香港","en":"Hong Kong"}]'), '["NVMe",{"zh":"香港","en":"Hong Kong"}]');
   assert.deepEqual(parseStoredTags('{broken'), []);
   assert.throws(() => serializeTags('[{"unknown":"value"}]'));
+});
+
+test('published content must include both Chinese and English', () => {
+  assert.doesNotThrow(() => assertBilingualContent(['zh', 'en']));
+  assert.doesNotThrow(() => assertBilingualContent(['en', 'zh']));
+  assert.throws(() => assertBilingualContent(['zh']), /missing: en/);
+  assert.throws(() => assertBilingualContent(['en']), /missing: zh/);
+  assert.throws(() => assertBilingualContent([]), /missing: zh, en/);
 });
 
 test('image validation checks content signatures', async () => {

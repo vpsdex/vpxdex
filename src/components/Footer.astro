@@ -10,52 +10,45 @@ const { lang } = Astro.props;
 const currentYear = new Date().getFullYear();
 ---
 
-<footer class="site-footer border-t py-12 mt-20">
-  <div class="site-shell mx-auto px-5 sm:px-6">
-    <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-8 mb-8">
+<footer class="site-footer">
+  <div class="container">
+    <div class="footer-grid">
       <div>
-        <div class="flex items-center gap-2.5 mb-4">
+        <div class="footer-brand">
           <span class="brand-mark" aria-hidden="true">V</span>
-          <h3 class="font-semibold">{t(lang, 'site.brand')}</h3>
+          <span>{t(lang, 'site.brand')}</span>
         </div>
-        <p class="nav-subtitle text-sm">{t(lang, 'site.description')}</p>
+        <p class="footer-desc">
+          {t(lang, 'footer.desc')}
+        </p>
       </div>
       <div>
-        <h3 class="font-semibold mb-4">{lang === 'zh' ? '快速链接' : 'Quick Links'}</h3>
-        <ul class="space-y-2">
-          <li>
-            <a href={`/${lang}/`} class="nav-link text-sm transition-colors">
-              {t(lang, 'nav.home')}
-            </a>
-          </li>
-          <li>
-            <a href={`/${lang}/activities/`} class="nav-link text-sm transition-colors">
-              {t(lang, 'nav.activities')}
-            </a>
-          </li>
+        <h3 class="footer-heading">{t(lang, 'footer.index')}</h3>
+        <ul class="footer-list">
+          <li><a href={`/${lang}/`}>{t(lang, 'nav.home')}</a></li>
+          <li><a href={`/${lang}/#directory`}>{t(lang, 'nav.providers')}</a></li>
+          <li><a href={`/${lang}/activities/`}>{t(lang, 'nav.activities')}</a></li>
         </ul>
       </div>
       <div>
-        <h3 class="font-semibold mb-4">{lang === 'zh' ? '关于' : 'About'}</h3>
-        <ul class="space-y-2">
-          <li><a href={`/${lang}/about/`} class="nav-link text-sm">{lang === 'zh' ? '关于我们' : 'About us'}</a></li>
-          <li><a href={`/${lang}/methodology/`} class="nav-link text-sm">{lang === 'zh' ? '评测方法' : 'Review methodology'}</a></li>
-          <li><a href={`/${lang}/disclosure/`} class="nav-link text-sm">{lang === 'zh' ? '商业披露' : 'Commercial disclosure'}</a></li>
-          <li><a href={`/${lang}/contact/`} class="nav-link text-sm">{lang === 'zh' ? '联系与纠错' : 'Contact & corrections'}</a></li>
+        <h3 class="footer-heading">{t(lang, 'footer.about')}</h3>
+        <ul class="footer-list">
+          <li><a href={`/${lang}/about/`}>{t(lang, 'footer.aboutUs')}</a></li>
+          <li><a href={`/${lang}/methodology/`}>{t(lang, 'footer.methodology')}</a></li>
+          <li><a href={`/${lang}/disclosure/`}>{t(lang, 'footer.disclosure')}</a></li>
+          <li><a href={`/${lang}/contact/`}>{t(lang, 'footer.contact')}</a></li>
         </ul>
       </div>
       <div>
-        <h3 class="font-semibold mb-4">{lang === 'zh' ? '政策' : 'Policies'}</h3>
-        <ul class="space-y-2">
-          <li><a href={`/${lang}/privacy/`} class="nav-link text-sm">{lang === 'zh' ? '隐私政策' : 'Privacy policy'}</a></li>
-          <li><a href={`/${lang}/terms/`} class="nav-link text-sm">{lang === 'zh' ? '使用条款' : 'Terms of use'}</a></li>
+        <h3 class="footer-heading">{t(lang, 'footer.policies')}</h3>
+        <ul class="footer-list">
+          <li><a href={`/${lang}/privacy/`}>{t(lang, 'footer.privacy')}</a></li>
+          <li><a href={`/${lang}/terms/`}>{t(lang, 'footer.terms')}</a></li>
         </ul>
       </div>
     </div>
-    <div class="pt-7 border-t footer-divider text-center">
-      <p class="nav-subtitle text-sm">
-        &copy; {currentYear} {t(lang, 'site.brand')}. {lang === 'zh' ? '保留所有权利。' : 'All rights reserved.'}
-      </p>
+    <div class="footer-bottom">
+      &copy; {currentYear} {t(lang, 'site.brand')} {t(lang, 'footer.rights')}
     </div>
   </div>
 </footer>

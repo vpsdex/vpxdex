@@ -7,7 +7,7 @@ import { invalidateCache } from '../../../../lib/cache';
 import { sanitizeRichText } from '../../../../lib/rich-text';
 import { requireApiAuth, jsonResponse, handleCors } from '../../../../lib/api-auth';
 import {
-  errorMessage, optionalText, parseStoredTags, RequestValidationError, requireText,
+  assertBilingualContent, errorMessage, optionalText, parseStoredTags, RequestValidationError, requireText,
   serializeTags, validateBoolean, validateHttpUrl, validateLocale, validateRating, validateSlug,
 } from '../../../../lib/validation';
 
@@ -55,12 +55,19 @@ export const POST: APIRoute = async ({ request }) => {
   if (auth) return auth;
 
   let insertedId: number | null = null;
+  let uploadedLogoKey: string | null = null;
   try {
     const body = await request.json() as Record<string, unknown>;
-    const { slug_zh, slug_en, url, category, rating, tags, is_active, contents } = body;
+    const { slug_zh, slug_en, url, category, rating, tags, is_active, logo_key, contents } = body;
     if (!contents || !Array.isArray(contents) || contents.length === 0) {
       return jsonResponse({ error: 'contents array is required (at least one language)' }, 400);
     }
+
+    if (logo_key !== undefined && logo_key !== null
+      && (typeof logo_key !== 'string' || !logo_key.startsWith('logos/'))) {
+      throw new RequestValidationError('logo_key must use the logos/ prefix');
+    }
+    if (typeof logo_key === 'string') uploadedLogoKey = logo_key;
 
     const normalizedContents = contents.map((content: Record<string, unknown>) => ({
       lang: validateLocale(content.lang),
@@ -72,6 +79,7 @@ export const POST: APIRoute = async ({ request }) => {
     if (new Set(normalizedContents.map((content) => content.lang)).size !== normalizedContents.length) {
       return jsonResponse({ error: 'contents contains duplicate languages' }, 400);
     }
+    assertBilingualContent(normalizedContents.map((content) => content.lang));
 
     const input = {
       slug_zh: validateSlug(slug_zh, 'slug_zh'),
@@ -88,6 +96,7 @@ export const POST: APIRoute = async ({ request }) => {
       .insert(providers)
       .values({
         ...input,
+        ...(logo_key !== undefined && { logo_key }),
         is_active: is_active === undefined ? true : validateBoolean(is_active, 'is_active'),
       })
       .returning({ id: providers.id })
@@ -110,6 +119,10 @@ export const POST: APIRoute = async ({ request }) => {
     if (insertedId) {
       try { await getDb(env.DB).delete(providers).where(eq(providers.id, insertedId)); }
       catch (cleanupError) { console.error('API provider cleanup error:', cleanupError); }
+      if (uploadedLogoKey) {
+        try { await env.R2.delete(uploadedLogoKey); }
+        catch (cleanupError) { console.error('API provider logo cleanup error:', cleanupError); }
+      }
     }
     return jsonResponse(
       { error: error instanceof RequestValidationError || error instanceof SyntaxError ? errorMessage(error) : 'Failed to create provider' },

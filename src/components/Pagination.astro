@@ -1,4 +1,6 @@
 ---
+import { t } from '../i18n/utils';
+
 interface Props {
   currentPage: number;
   totalPages: number;
@@ -22,71 +24,38 @@ const pageHref = (page: number) => {
 const pageNumbers = Array.from({ length: totalPages }, (_, index) => index + 1).filter((page) => (
   page === 1 || page === totalPages || Math.abs(page - currentPage) <= 2
 ));
+const formatPage = (page: number) => String(page).padStart(2, '0');
 ---
 
 {totalPages > 1 && (
-  <nav class="mt-10 flex flex-wrap items-center justify-center gap-2" aria-label={lang === 'zh' ? '分页导航' : 'Pagination'}>
+  <nav class="pagination" aria-label={t(lang, 'pagination.aria')}>
     {currentPage > 1 ? (
       <a class="pagination-link" href={pageHref(currentPage - 1)} rel="prev">
-        {lang === 'zh' ? '上一页' : 'Previous'}
+        {t(lang, 'pagination.previous')}
       </a>
     ) : (
-      <span class="pagination-link is-disabled" aria-disabled="true">{lang === 'zh' ? '上一页' : 'Previous'}</span>
+      <span class="pagination-link is-disabled" aria-disabled="true">{t(lang, 'pagination.previous')}</span>
     )}
 
     {pageNumbers.map((page, index) => (
       <Fragment>
-        {index > 0 && page - pageNumbers[index - 1] > 1 && <span class="px-1 text-gray-400" aria-hidden="true">…</span>}
+        {index > 0 && page - pageNumbers[index - 1] > 1 && <span class="pagination-gap" aria-hidden="true">…</span>}
         <a
           class:list={['pagination-link', { 'is-current': page === currentPage }]}
           href={pageHref(page)}
           aria-current={page === currentPage ? 'page' : undefined}
         >
-          {page}
+          {formatPage(page)}
         </a>
       </Fragment>
     ))}
 
     {currentPage < totalPages ? (
       <a class="pagination-link" href={pageHref(currentPage + 1)} rel="next">
-        {lang === 'zh' ? '下一页' : 'Next'}
+        {t(lang, 'pagination.next')}
       </a>
     ) : (
-      <span class="pagination-link is-disabled" aria-disabled="true">{lang === 'zh' ? '下一页' : 'Next'}</span>
+      <span class="pagination-link is-disabled" aria-disabled="true">{t(lang, 'pagination.next')}</span>
     )}
   </nav>
 )}
-
-<style>
-  .pagination-link {
-    display: inline-flex;
-    min-width: 2.5rem;
-    height: 2.5rem;
-    align-items: center;
-    justify-content: center;
-    border: 1px solid var(--theme-border);
-    border-radius: 0.7rem;
-    background: #fff;
-    color: #374151;
-    padding: 0 0.75rem;
-    font-size: 0.875rem;
-    font-weight: 650;
-    box-shadow: 0 1px 2px rgba(15, 28, 48, 0.035);
-    transition: border-color 0.15s ease, color 0.15s ease, background-color 0.15s ease, transform 0.15s ease;
-  }
-
-  .pagination-link:hover:not(.is-disabled),
-  .pagination-link.is-current {
-    border-color: var(--theme-accent);
-    background: var(--theme-accent);
-    color: #fff;
-  }
-
-  .pagination-link:hover:not(.is-disabled) { transform: translateY(-1px); }
-
-  .pagination-link.is-disabled {
-    cursor: not-allowed;
-    background: #f9fafb;
-    color: #9ca3af;
-  }
-</style>

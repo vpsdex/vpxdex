@@ -1,4 +1,5 @@
 export const SUPPORTED_LOCALES = ['zh', 'en'] as const;
+export const REQUIRED_CONTENT_LOCALES = ['zh', 'en'] as const;
 
 export type SupportedLocale = (typeof SUPPORTED_LOCALES)[number];
 export type ProviderTag = string | { zh?: string; en?: string };
@@ -125,6 +126,16 @@ export function parseStoredTags(value: string | null | undefined): ProviderTag[]
 export function validateLocale(value: unknown): SupportedLocale {
   if (value !== 'zh' && value !== 'en') throw new RequestValidationError('lang must be zh or en');
   return value;
+}
+
+export function assertBilingualContent(langs: Iterable<string>): void {
+  const present = new Set(langs);
+  const missing = REQUIRED_CONTENT_LOCALES.filter((locale) => !present.has(locale));
+  if (missing.length > 0) {
+    throw new RequestValidationError(
+      `contents must include both zh and en (missing: ${missing.join(', ')})`,
+    );
+  }
 }
 
 export function errorMessage(error: unknown): string {

@@ -1,7 +1,5 @@
 ---
-import '../../../styles/global.css';
-import Header from '../../../components/Header.astro';
-import Footer from '../../../components/Footer.astro';
+import BaseLayout from '../../../layouts/BaseLayout.astro';
 import Pagination from '../../../components/Pagination.astro';
 import { t } from '../../../i18n/utils';
 import { isValidLocale, locales, type Locale } from '../../../i18n/config';
@@ -40,8 +38,14 @@ if (currentPage < 1 || (pageParam !== null && (currentPage === 1 || !/^\d+$/.tes
   return Astro.redirect(pageHref(1), 301);
 }
 
-const whereClause = eq(activities.is_active, true);
-const [{ total }] = await db.select({ total: count() }).from(activities).where(whereClause);
+const [{ total }] = await db
+  .select({ total: count() })
+  .from(activities)
+  .innerJoin(
+    activitiesContent,
+    and(eq(activitiesContent.activity_id, activities.id), eq(activitiesContent.lang, lang)),
+  )
+  .where(eq(activities.is_active, true));
 const totalPages = Math.max(1, Math.ceil(total / pageSize));
 if (currentPage > totalPages) {
   return Astro.redirect(pageHref(totalPages), 302);
@@ -50,7 +54,6 @@ if (currentPage > totalPages) {
 const activityRows = await db.select({
   id: activities.id,
   slug: activitiesContent.slug,
-  fallbackSlug: activities.slug,
   featuredImageKey: activities.featured_image_key,
   publishedAt: activities.published_at,
   isFeatured: activities.is_featured,
@@ -58,34 +61,44 @@ const activityRows = await db.select({
   title: activitiesContent.title,
   description: activitiesContent.description,
   content: activitiesContent.content,
-}).from(activities).leftJoin(
+}).from(activities).innerJoin(
   activitiesContent,
   and(eq(activitiesContent.activity_id, activities.id), eq(activitiesContent.lang, lang)),
-).where(whereClause)
+).where(eq(activities.is_active, true))
   .orderBy(desc(activities.is_featured), desc(activities.published_at))
   .limit(pageSize)
   .offset((currentPage - 1) * pageSize);
 
-const allActivities = activityRows.map((row) => ({
-  id: row.id,
-  slug: row.slug || row.fallbackSlug,
-  featuredImage: getActivityImageUrl(row.featuredImageKey),
-  publishedAt: row.publishedAt,
-  isFeatured: row.isFeatured,
-  viewCount: row.viewCount,
-  title: row.title || row.fallbackSlug,
-  description: row.description || '',
-  content: row.content || '',
-}));
+const allActivities = activityRows.map((row) => {
+  const plain = richTextToPlainText(row.content || '');
+  const readingMinutes = Math.max(
+    1,
+    Math.ceil(
+      lang === 'zh'
+        ? plain.replace(/\s+/g, '').length / 400
+        : plain.split(/\s+/).filter(Boolean).length / 200,
+    ),
+  );
+  return {
+    id: row.id,
+    slug: row.slug,
+    featuredImage: getActivityImageUrl(row.featuredImageKey),
+    publishedAt: row.publishedAt,
+    isFeatured: row.isFeatured,
+    viewCount: row.viewCount,
+    title: row.title,
+    description: row.description || '',
+    content: row.content || '',
+    readingMinutes,
+  };
+});
 
 const siteName = t(lang, 'site.brand');
-const paginationTitle = currentPage > 1 ? (lang === 'zh' ? ` - 第 ${currentPage} 页` : ` - Page ${currentPage}`) : '';
-const pageTitle = lang === 'zh'
-  ? `VPS评测、优惠与选购指南${paginationTitle}`
-  : `VPS Reviews & Hosting Guides: 2026 Tests & Deals${paginationTitle}`;
-const pageDesc = lang === 'zh'
-  ? '查看 VPS 主机评测、优惠活动、产品更新、线路分析与选购指南，了解价格、适用场景和重要限制。'
-  : 'Independent VPS reviews and verified deals for 2026: hosting tests, CN2/9929 routing analysis, pricing context and the limits to check before buying.';
+const paginationSuffix = currentPage > 1
+  ? t(lang, 'common.pageSuffix', { page: currentPage })
+  : '';
+const pageTitle = t(lang, 'activities.seoTitle', { page: paginationSuffix });
+const pageDesc = t(lang, 'activities.seoDescription');
 const siteUrl = Astro.site!.href.replace(/\/$/, '');
 const canonicalUrl = `${siteUrl}${pageHref(currentPage)}`;
 const alternateSuffix = canonicalUrl.slice(`${siteUrl}${basePath}`.length);
@@ -93,7 +106,7 @@ const alternates = locales.map((locale) => ({ lang: locale, href: `${siteUrl}/${
 const prevUrl = currentPage > 1 ? `${siteUrl}${pageHref(currentPage - 1)}` : undefined;
 const nextUrl = currentPage < totalPages ? `${siteUrl}${pageHref(currentPage + 1)}` : undefined;
 const socialImage = allActivities.find((item) => item.featuredImage)?.featuredImage;
-const absoluteSocialImage = socialImage ? `${siteUrl}${socialImage}` : `${siteUrl}/favicon.svg`;
+const absoluteSocialImage = socialImage ? `${siteUrl}${socialImage}` : `${siteUrl}/og-image.png`;
 const jsonLd = {
   '@context': 'https://schema.org', '@type': 'CollectionPage', name: pageTitle, description: pageDesc,
   url: canonicalUrl, inLanguage: lang,
@@ -112,92 +125,107 @@ const jsonLd = {
 };
 ---
 
-<!doctype html>
-<html lang={lang}>
-  <head>
-    <meta charset="utf-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <title>{pageTitle} - {siteName}</title>
-    <meta name="description" content={pageDesc} />
-    <meta name="robots" content="index, follow" />
-    <link rel="canonical" href={canonicalUrl} />
-    {prevUrl && <link rel="prev" href={prevUrl} />}
-    {nextUrl && <link rel="next" href={nextUrl} />}
-    <meta property="og:title" content={`${pageTitle} - ${siteName}`} />
-    <meta property="og:description" content={pageDesc} />
-    <meta property="og:type" content="website" />
-    <meta property="og:url" content={canonicalUrl} />
-    <meta property="og:site_name" content={siteName} />
-    <meta property="og:locale" content={lang === 'zh' ? 'zh_CN' : 'en_US'} />
-    <meta property="og:image" content={absoluteSocialImage} />
-    <meta name="twitter:card" content="summary_large_image" />
-    <meta name="twitter:title" content={`${pageTitle} - ${siteName}`} />
-    <meta name="twitter:description" content={pageDesc} />
-    <meta name="twitter:image" content={absoluteSocialImage} />
-    {alternates.map((alt) => <link rel="alternate" hreflang={alt.lang} href={alt.href} />)}
-    <link rel="alternate" hreflang="x-default" href={`${siteUrl}/zh/activities/${alternateSuffix}`} />
-    <script type="application/ld+json" set:html={JSON.stringify(jsonLd)} />
-  </head>
-  <body class="min-h-screen bg-gray-50 text-gray-900 flex flex-col">
-    <Header lang={lang} alternates={alternates} />
-    <main class="site-main flex-1 mx-auto px-5 sm:px-6 py-8">
-      <div class="home-hero text-center mb-6">
-        <p class="eyebrow">{lang === 'zh' ? '行业动态' : 'Market updates'}</p>
-        <h1 class="text-4xl font-bold mt-3 mb-4 tracking-tight">{pageTitle}</h1>
-        <p class="text-base leading-7 text-gray-600 max-w-2xl mx-auto">{pageDesc}</p>
+<BaseLayout
+  title={`${pageTitle} - ${siteName}`}
+  description={pageDesc}
+  lang={lang}
+  alternates={alternates}
+  jsonLd={jsonLd}
+  xDefault={`${siteUrl}/zh/activities/${alternateSuffix}`}
+  canonical={canonicalUrl}
+  prev={prevUrl}
+  next={nextUrl}
+  image={absoluteSocialImage}
+  twitterCard={socialImage ? 'summary_large_image' : 'summary'}
+>
+  <section class="hero">
+    <div class="hero-grid">
+      <div>
+        <p class="eyebrow">{t(lang, 'activities.eyebrow')}</p>
+        <h1 class="hero-title">{t(lang, 'activities.heroTitle')}</h1>
+        <p
+          class="hero-copy"
+          set:html={t(lang, 'activities.heroCopy', {
+            total: `<span class="mono">${total}</span>`,
+          })}
+        />
+        <div class="hero-actions">
+          <a class="btn" href="#activity-list">{t(lang, 'activities.browse')}</a>
+          <a class="text-link" href={`/${lang}/methodology/`}>
+            {t(lang, 'common.method')} →
+          </a>
+        </div>
       </div>
 
-      <div class="mb-5 text-sm text-gray-500">{lang === 'zh' ? `共 ${total} 条活动` : `${total} activities`}</div>
-      {allActivities.length > 0 ? (
-        <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-          {allActivities.map((activity) => (
-            <article class="activity-card bg-white border border-gray-200 overflow-hidden">
-              {activity.featuredImage && (
-                <a
-                  href={`/${lang}/activity/${activity.slug}/`}
-                  class="activity-card-media block overflow-hidden bg-gray-100"
-                  aria-label={activity.title}
-                >
-                  <img
-                    src={activity.featuredImage}
-                    alt={activity.title}
-                    width="720"
-                    height="405"
-                    loading="lazy"
-                    class="block aspect-video w-full object-cover transition-transform duration-300"
-                  />
-                </a>
-              )}
-              <div class="activity-card-body p-6">
-                {activity.isFeatured && (
-                  <div class="mb-3 text-xs text-yellow-600">⭐ {lang === 'zh' ? '推荐' : 'Featured'}</div>
-                )}
-                <h2 class="text-xl font-semibold mb-3 line-clamp-2">
-                  <a href={`/${lang}/activity/${activity.slug}/`} class="hover:text-blue-600 transition-colors">{activity.title}</a>
-                </h2>
-                <p class="text-gray-600 text-sm mb-4 line-clamp-3">
-                  {activity.description || richTextToPlainText(activity.content).slice(0, 150)}
-                </p>
-                <div class="activity-card-meta flex items-center justify-between text-xs text-gray-500">
-                  <time datetime={activity.publishedAt}>{new Date(activity.publishedAt).toLocaleDateString(lang === 'zh' ? 'zh-CN' : 'en-US')}</time>
-                  <span>{activity.viewCount} {lang === 'zh' ? '次浏览' : 'views'}</span>
-                </div>
-              </div>
-            </article>
-          ))}
+      <div class="hero-facts" aria-label={t(lang, 'activities.factsAria')}>
+        <div class="fact-row">
+          <span class="fact-label">{t(lang, 'common.total')}</span>
+          <span class="fact-value">{String(total).padStart(2, '0')}</span>
         </div>
-      ) : (
-        <div class="text-center py-12 text-gray-500">{lang === 'zh' ? '暂无活动' : 'No activities yet'}</div>
-      )}
-      <Pagination currentPage={currentPage} totalPages={totalPages} basePath={basePath} lang={lang} />
-    </main>
-    <Footer lang={lang} />
-  </body>
-</html>
+        <div class="fact-row">
+          <span class="fact-label">{t(lang, 'common.page')}</span>
+          <span class="fact-value">{String(currentPage).padStart(2, '0')} / {String(totalPages).padStart(2, '0')}</span>
+        </div>
+        <div class="fact-row">
+          <span class="fact-label">{t(lang, 'common.latest')}</span>
+          <span class="fact-value">
+            {allActivities[0] ? allActivities[0].publishedAt.slice(0, 10) : '—'}
+          </span>
+        </div>
+      </div>
+    </div>
+  </section>
 
-<style>
-  .activity-card:hover .activity-card-media img { transform: scale(1.035); }
-  .line-clamp-2, .line-clamp-3 { display:-webkit-box; -webkit-box-orient:vertical; overflow:hidden; }
-  .line-clamp-2 { -webkit-line-clamp:2; }
-  .line-clamp-3 { -webkit-line-clamp:3; }
-</style>
+  <section class="section-gap" id="activity-list">
+    <div class="section-head">
+      <h2 class="section-title">{t(lang, 'activities.all')}</h2>
+      <div class="section-side">
+        <span class="section-count">{String(allActivities.length).padStart(2, '0')} / {String(total).padStart(2, '0')}</span>
+      </div>
+    </div>
+
+    {allActivities.length > 0 ? (
+      <div class="hair-grid">
+        {allActivities.map((activity) => (
+          <article class="card">
+            {activity.featuredImage && (
+              <div class="card-media">
+                <img
+                  src={activity.featuredImage}
+                  alt=""
+                  width="720"
+                  height="405"
+                  loading="lazy"
+                />
+              </div>
+            )}
+            <span class="card-eyebrow">
+              {activity.isFeatured && <>{t(lang, 'common.featured')} · </>}
+              {activity.publishedAt.slice(0, 10)}
+            </span>
+            <h2 class="card-title">
+              <a href={`/${lang}/activity/${activity.slug}/`} class="stretched-link">{activity.title}</a>
+            </h2>
+            <p class="card-desc">
+              {activity.description || richTextToPlainText(activity.content).slice(0, 150)}
+            </p>
+            <div class="card-metrics">
+              <span class="card-metric-value">{activity.viewCount}</span>
+              <span class="card-metric-label">{t(lang, 'common.views')}</span>
+            </div>
+            <div class="card-footer">
+              <span class="card-fact">
+                {t(lang, 'common.readingTime', { count: activity.readingMinutes })}
+              </span>
+              <span class="card-arrow" aria-hidden="true">→</span>
+            </div>
+          </article>
+        ))}
+      </div>
+    ) : (
+      <p class="empty-state">{t(lang, 'activities.empty')}</p>
+    )}
+  </section>
+
+  <Pagination currentPage={currentPage} totalPages={totalPages} basePath={basePath} lang={lang} />
+</BaseLayout>

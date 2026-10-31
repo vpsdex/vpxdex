@@ -7,9 +7,18 @@ import { invalidateCache } from '../../../../lib/cache';
 import { sanitizeRichText } from '../../../../lib/rich-text';
 import { requireApiAuth, jsonResponse, handleCors } from '../../../../lib/api-auth';
 import {
-  errorMessage, optionalText, parseStoredTags, RequestValidationError, requireText,
+  assertBilingualContent, errorMessage, optionalText, parseStoredTags, RequestValidationError, requireText,
   serializeTags, validateBoolean, validateHttpUrl, validateLocale, validateRating, validateSlug,
+  type SupportedLocale,
 } from '../../../../lib/validation';
+
+type ProviderContentInput = {
+  lang: SupportedLocale;
+  name: string;
+  desc: string | null;
+  meta_title: string | null;
+  meta_desc: string | null;
+};
 
 // GET /api/v1/providers/:id - 获取单个服务商详情
 export const GET: APIRoute = async ({ request, params }) => {
@@ -78,50 +87,71 @@ export const PUT: APIRoute = async ({ request, params }) => {
       throw new RequestValidationError('logo_key must use the logos/ prefix');
     }
 
-    await db
-      .update(providers)
-      .set({
-        ...(slug_zh !== undefined && { slug_zh: validateSlug(slug_zh, 'slug_zh') }),
-        ...(slug_en !== undefined && { slug_en: validateSlug(slug_en, 'slug_en') }),
-        ...(url !== undefined && { url: validateHttpUrl(url) }),
-        ...(category !== undefined && { category: requireText(category, 'category', 60) }),
-        ...(rating !== undefined && { rating: validateRating(rating) }),
-        ...(tags !== undefined && { tags: serializeTags(tags) }),
-        ...(is_active !== undefined && { is_active: validateBoolean(is_active, 'is_active') }),
-        ...(logo_key !== undefined && { logo_key }),
-        updated_at: new Date().toISOString(),
-      })
-      .where(eq(providers.id, id));
+    const updates = {
+      updated_at: new Date().toISOString(),
+      ...(slug_zh !== undefined && { slug_zh: validateSlug(slug_zh, 'slug_zh') }),
+      ...(slug_en !== undefined && { slug_en: validateSlug(slug_en, 'slug_en') }),
+      ...(url !== undefined && { url: validateHttpUrl(url) }),
+      ...(category !== undefined && { category: requireText(category, 'category', 60) }),
+      ...(rating !== undefined && { rating: validateRating(rating) }),
+      ...(tags !== undefined && { tags: serializeTags(tags) }),
+      ...(is_active !== undefined && { is_active: validateBoolean(is_active, 'is_active') }),
+      ...(logo_key !== undefined && { logo_key }),
+    };
 
-    if (Array.isArray(contents)) {
-      for (const rawContent of contents) {
-        if (!rawContent || typeof rawContent !== 'object') throw new RequestValidationError('contents entries must be objects');
-        const c = rawContent as Record<string, any>;
-        const lang = validateLocale(c.lang);
+    let normalizedContents: ProviderContentInput[] | null = null;
+    if (contents !== undefined) {
+      if (!Array.isArray(contents)) throw new RequestValidationError('contents must be an array');
+      normalizedContents = contents.map((rawContent) => {
+        if (!rawContent || typeof rawContent !== 'object') {
+          throw new RequestValidationError('contents entries must be objects');
+        }
+        const c = rawContent as Record<string, unknown>;
+        return {
+          lang: validateLocale(c.lang),
+          name: requireText(c.name, 'contents.name', 200),
+          desc: sanitizeRichText(optionalText(c.desc, 100_000)),
+          meta_title: optionalText(c.meta_title, 200),
+          meta_desc: optionalText(c.meta_desc, 500),
+        };
+      });
+      if (new Set(normalizedContents.map((content) => content.lang)).size !== normalizedContents.length) {
+        throw new RequestValidationError('contents contains duplicate languages');
+      }
+      const existingLangs = await db
+        .select({ lang: providersContent.lang })
+        .from(providersContent)
+        .where(eq(providersContent.provider_id, id));
+      assertBilingualContent([
+        ...existingLangs.map((row) => row.lang),
+        ...normalizedContents.map((content) => content.lang),
+      ]);
+    }
+
+    await db.update(providers).set(updates).where(eq(providers.id, id));
+
+    if (normalizedContents) {
+      for (const c of normalizedContents) {
         const existingContent = await db
           .select()
           .from(providersContent)
-          .where(and(eq(providersContent.provider_id, id), eq(providersContent.lang, lang)))
+          .where(and(eq(providersContent.provider_id, id), eq(providersContent.lang, c.lang)))
           .get();
 
         if (existingContent) {
           await db
             .update(providersContent)
             .set({
-              name: requireText(c.name, 'contents.name', 200),
-              desc: sanitizeRichText(optionalText(c.desc, 100_000)),
-              meta_title: optionalText(c.meta_title, 200),
-              meta_desc: optionalText(c.meta_desc, 500),
+              name: c.name,
+              desc: c.desc,
+              meta_title: c.meta_title,
+              meta_desc: c.meta_desc,
             })
             .where(eq(providersContent.id, existingContent.id));
         } else {
           await db.insert(providersContent).values({
             provider_id: id,
-            lang,
-            name: requireText(c.name, 'contents.name', 200),
-            desc: sanitizeRichText(optionalText(c.desc, 100_000)),
-            meta_title: optionalText(c.meta_title, 200),
-            meta_desc: optionalText(c.meta_desc, 500),
+            ...c,
           });
         }
       }
