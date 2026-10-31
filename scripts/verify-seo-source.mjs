@@ -40,7 +40,8 @@ assert(card.includes('provider/${slug}/`'), 'Provider cards must link directly t
 assert(home.includes('provider/${escapeHtml(slug)}/'), 'Client-rendered provider cards must keep canonical slashes');
 assert(!home.includes('searchTags.innerHTML'), 'Homepage tags must be server-rendered to prevent CLS');
 assert(home.includes('homepageTags.map'), 'Homepage must render tags during SSR');
-assert(home.includes('items.slice(0, 6)'), 'Homepage must limit each category to six providers');
+assert(home.includes('const HOMEPAGE_CATEGORY_LIMIT = 9;'), 'Homepage must cap each category at nine providers');
+assert(home.includes('items.slice(0, HOMEPAGE_CATEGORY_LIMIT)'), 'Homepage rendering must use the category limit');
 assert(category.includes("'@type': 'CollectionPage'"), 'Category pages need CollectionPage schema');
 assert(category.includes('xDefault'), 'Category pages need an x-default URL');
 assert(category.includes('.limit(pageSize)') && category.includes('.offset((currentPage - 1) * pageSize)'), 'Category pages need database pagination');

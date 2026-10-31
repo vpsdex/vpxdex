@@ -1,6 +1,7 @@
 ---
 import type { Locale } from '../i18n/config';
 import { t } from '../i18n/utils';
+import BrandMark from './BrandMark.astro';
 
 interface Props {
   lang: Locale;
@@ -15,7 +16,7 @@ const currentYear = new Date().getFullYear();
     <div class="footer-grid">
       <div>
         <div class="footer-brand">
-          <span class="brand-mark" aria-hidden="true">V</span>
+          <BrandMark />
           <span>{t(lang, 'site.brand')}</span>
         </div>
         <p class="footer-desc">

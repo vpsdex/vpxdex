@@ -12,6 +12,8 @@ import { richTextToPlainText } from '../../lib/rich-text';
 import { getLogoUrl } from '../../lib/r2';
 import { isProviderCategory, providerCategories } from '../../lib/provider-categories';
 
+const HOMEPAGE_CATEGORY_LIMIT = 9;
+
 const lang = Astro.params.lang as string;
 if (!isValidLocale(lang)) {
   return new Response('Not Found', {
@@ -95,7 +97,7 @@ const providerSearchData = categoryEntries.flatMap(([cat, items]) =>
         }
       : null,
   })));
-const homepageProviderData = categoryEntries.flatMap(([, items]) => items.slice(0, 6));
+const homepageProviderData = categoryEntries.flatMap(([, items]) => items.slice(0, HOMEPAGE_CATEGORY_LIMIT));
 
 const pad = (value: number) => String(value).padStart(2, '0');
 const totalProviders = localizedData.length;
@@ -271,7 +273,7 @@ const itemListJsonLd = {
           <div class="section-head">
             <h2 class="section-title">{t(lang, `categories.${category}`)}</h2>
             <div class="section-side">
-              <span class="section-count">{pad(Math.min(items.length, 6))} / {pad(items.length)}</span>
+              <span class="section-count">{pad(Math.min(items.length, HOMEPAGE_CATEGORY_LIMIT))} / {pad(items.length)}</span>
               {isProviderCategory(category) && (
                 <a href={`/${lang}/category/${category}/`} class="section-link">
                   {t(lang, 'home.viewAll')} →
@@ -280,7 +282,7 @@ const itemListJsonLd = {
             </div>
           </div>
           <div class="hair-grid">
-            {items.slice(0, 6).map((row) => (
+            {items.slice(0, HOMEPAGE_CATEGORY_LIMIT).map((row) => (
               <ProviderCard
                 provider={row.providers}
                 content={row.providers_content}
@@ -300,6 +302,7 @@ const itemListJsonLd = {
     categoryPaths: JSON.stringify(Object.fromEntries(providerCategories.map((category) => [category, `/${lang}/category/${category}/`]))),
     tagFilters: JSON.stringify(Object.fromEntries(selectedTagDefinitions.map((tag) => [tag.value, [tag.zh, tag.en]]))),
     viewAllLabel: t(lang, 'home.viewAll'),
+    categoryLimit: HOMEPAGE_CATEGORY_LIMIT,
     emptyLabel: t(lang, 'home.noMatch'),
     emptyHintLabel: t(lang, 'home.noMatchHint'),
     clearFiltersLabel: t(lang, 'home.clearFilters'),
@@ -468,7 +471,7 @@ const itemListJsonLd = {
 
       const shouldLimit = !currentSearch && !currentTagFilter;
       providerContainer.innerHTML = Array.from(categories.entries()).map(([category, items]) => {
-        const visibleItems = shouldLimit ? items.slice(0, 6) : items;
+        const visibleItems = shouldLimit ? items.slice(0, categoryLimit) : items;
         const categoryLabel = localizedCategoryLabels[category] || category;
         const categoryPath = localizedCategoryPaths[category];
         const count = `${padNumber(visibleItems.length)} / ${padNumber(items.length)}`;
